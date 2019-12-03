@@ -234,12 +234,17 @@ def draw_overlay(image: np.ndarray,
 
 def detect_grid_points(bin_field: Field):
     assert bin_field.image.shape[0] == bin_field.image.shape[1]
-
     pieces_n = 3
     piece_side = bin_field.image.shape[0] // pieces_n
+    h_x1, h_x2, h_y1, h_y2, v_x1, v_x2, v_y1, v_y2 = collect_line_segments(
+        bin_field.image, pieces_n, piece_side
+    )
+    xs, ys = find_intersections(h_x1, h_x2, h_y1, h_y2, v_x1, v_x2, v_y1, v_y2)
+    grid = approximate_grid(bin_field, xs, ys).astype(dtype=int)
+    return grid
 
-    imgx = cv2.cvtColor(bin_field.image, cv2.COLOR_GRAY2BGR)
 
+def collect_line_segments(image, pieces_n, piece_side):
     h_x1 = []
     h_x2 = []
     h_y1 = []
@@ -254,7 +259,7 @@ def detect_grid_points(bin_field: Field):
             offset_x = piece_side * piece_x
 
             piece_h_lines, piece_v_lines = collect_lines_in_grid_piece(
-                bin_field.image,
+                image,
                 piece_side,
                 piece_x, piece_y)
 
@@ -280,70 +285,7 @@ def detect_grid_points(bin_field: Field):
     v_y1 = np.hstack(v_y1)
     v_y2 = np.hstack(v_y2)
 
-    # Calculate line coefficients from cross-product of segment points.
-    # See https://stackoverflow.com/a/42727584
-    ones = np.ones(shape=(h_x1.shape[0],))
-    point1 = np.vstack([h_x1, h_y1, ones])
-    point2 = np.vstack([h_x2, h_y2, ones])
-    h_lines = np.cross(point1, point2, axis=0)
-    h_lines = h_lines.T
-
-    ones = np.ones(shape=(v_x1.shape[0],))
-    point1 = np.vstack([v_x1, v_y1, ones])
-    point2 = np.vstack([v_x2, v_y2, ones])
-    v_lines = np.cross(point1, point2, axis=0)
-    v_lines = v_lines.T
-
-    assert (h_lines.shape[0] ==
-            h_x1.shape[0] ==
-            h_x2.shape[0] ==
-            h_y1.shape[0] ==
-            h_y2.shape[0])
-    assert (v_lines.shape[0] ==
-            v_x1.shape[0] ==
-            v_x2.shape[0] ==
-            v_y1.shape[0] ==
-            v_y2.shape[0])
-
-    # Find line intersections from cross-product of line coefficients.
-    # See https://stackoverflow.com/a/42727584
-    cmb = np.array(list(product(h_lines, v_lines)))
-    cr = np.cross(cmb[:, 0, :], cmb[:, 1, :])
-
-    zs = cr[:, 2]
-    xs = (cr[:, 0] / zs).reshape(h_lines.shape[0], v_lines.shape[0])
-    ys = (cr[:, 1] / zs).reshape(h_lines.shape[0], v_lines.shape[0])
-
-    # Filter out intersection points that don't belong to real segments.
-    cond = np.ones(shape=(xs.shape[0], xs.shape[1]), dtype=bool)
-
-    all_v_x = np.vstack([v_x1, v_x2])
-    np.logical_and(cond, xs <= np.max(all_v_x, axis=0), out=cond)
-    np.logical_and(cond, xs >= np.min(all_v_x, axis=0), out=cond)
-
-    all_v_y = np.vstack([v_y1, v_y2])
-    np.logical_and(cond, ys <= np.max(all_v_y, axis=0), out=cond)
-    np.logical_and(cond, ys >= np.min(all_v_y, axis=0), out=cond)
-
-    xs = xs.T
-    ys = ys.T
-    cond = cond.T
-
-    all_h_x = np.vstack([h_x1, h_x2])
-    np.logical_and(cond, xs <= np.max(all_h_x, axis=0), out=cond)
-    np.logical_and(cond, xs >= np.min(all_h_x, axis=0), out=cond)
-
-    all_h_y = np.vstack([h_y1, h_y2])
-    np.logical_and(cond, ys <= np.max(all_h_y, axis=0), out=cond)
-    np.logical_and(cond, ys >= np.min(all_h_y, axis=0), out=cond)
-
-    # Draw.
-    xs = xs[cond].astype(dtype=int)
-    ys = ys[cond].astype(dtype=int)
-    for i in range(xs.shape[0]):
-        cv2.circle(imgx, (xs[i], ys[i]), 3, (255, 0, 255), -1)
-
-    show_image("imgx", imgx)
+    return h_x1, h_x2, h_y1, h_y2, v_x1, v_x2, v_y1, v_y2
 
 
 def collect_lines_in_grid_piece(
@@ -461,3 +403,93 @@ def lines_to_segments(lines, piece_side, offset_x, offset_y):
     y2 += offset_y
 
     return x1, y1, x2, y2
+
+
+def find_intersections(h_x1, h_x2, h_y1, h_y2, v_x1, v_x2, v_y1, v_y2):
+    # Calculate line coefficients from cross-product of segment points.
+    # See https://stackoverflow.com/a/42727584
+    ones = np.ones(shape=(h_x1.shape[0],))
+    point1 = np.vstack([h_x1, h_y1, ones])
+    point2 = np.vstack([h_x2, h_y2, ones])
+    h_lines = np.cross(point1, point2, axis=0)
+    h_lines = h_lines.T
+
+    ones = np.ones(shape=(v_x1.shape[0],))
+    point1 = np.vstack([v_x1, v_y1, ones])
+    point2 = np.vstack([v_x2, v_y2, ones])
+    v_lines = np.cross(point1, point2, axis=0)
+    v_lines = v_lines.T
+
+    assert (h_lines.shape[0] ==
+            h_x1.shape[0] ==
+            h_x2.shape[0] ==
+            h_y1.shape[0] ==
+            h_y2.shape[0])
+    assert (v_lines.shape[0] ==
+            v_x1.shape[0] ==
+            v_x2.shape[0] ==
+            v_y1.shape[0] ==
+            v_y2.shape[0])
+
+    # Find line intersections from cross-product of line coefficients.
+    # See https://stackoverflow.com/a/42727584
+    cmb = np.array(list(product(h_lines, v_lines)))
+    cr = np.cross(cmb[:, 0, :], cmb[:, 1, :])
+
+    zs = cr[:, 2]
+    xs = (cr[:, 0] / zs).reshape(h_lines.shape[0], v_lines.shape[0])
+    ys = (cr[:, 1] / zs).reshape(h_lines.shape[0], v_lines.shape[0])
+
+    # Filter out intersection points that don't belong to real segments.
+    cond = np.ones(shape=(xs.shape[0], xs.shape[1]), dtype=bool)
+
+    all_v_x = np.vstack([v_x1, v_x2])
+    np.logical_and(cond, xs <= np.max(all_v_x, axis=0), out=cond)
+    np.logical_and(cond, xs >= np.min(all_v_x, axis=0), out=cond)
+
+    all_v_y = np.vstack([v_y1, v_y2])
+    np.logical_and(cond, ys <= np.max(all_v_y, axis=0), out=cond)
+    np.logical_and(cond, ys >= np.min(all_v_y, axis=0), out=cond)
+
+    xs = xs.T
+    ys = ys.T
+    cond = cond.T
+
+    all_h_x = np.vstack([h_x1, h_x2])
+    np.logical_and(cond, xs <= np.max(all_h_x, axis=0), out=cond)
+    np.logical_and(cond, xs >= np.min(all_h_x, axis=0), out=cond)
+
+    all_h_y = np.vstack([h_y1, h_y2])
+    np.logical_and(cond, ys <= np.max(all_h_y, axis=0), out=cond)
+    np.logical_and(cond, ys >= np.min(all_h_y, axis=0), out=cond)
+
+    return xs[cond], ys[cond]
+
+
+def approximate_grid(field, xs, ys):
+    grid_rows_cols = 10
+    result = np.zeros(shape=(grid_rows_cols, grid_rows_cols, 2), dtype=float)
+    cell_side = field.side // 9
+    for ideal_row in range(grid_rows_cols):
+        for ideal_col in range(grid_rows_cols):
+            ideal_x = field.margin + ideal_col * cell_side
+            ideal_y = field.margin + ideal_row * cell_side
+
+            t1 = np.subtract(xs, ideal_x)
+            np.multiply(t1, t1, out=t1)
+            t2 = np.subtract(ys, ideal_y)
+            np.multiply(t2, t2, out=t2)
+            np.add(t1, t2, out=t1)
+            dists = t1
+            np.clip(dists, a_min=1, a_max=None, out=dists)
+
+            np.multiply(dists, dists, out=dists)
+            # np.multiply(dists, dists, out=dists)
+            np.divide(1, dists, out=dists)
+
+            # m_x = np.sum(xs * dists) / np.sum(dists)
+            # m_y = np.sum(ys * dists) / np.sum(dists)
+            m_x = np.average(xs, weights=dists)
+            m_y = np.average(ys, weights=dists)
+            result[ideal_row, ideal_col, :] = [m_x, m_y]
+    return result

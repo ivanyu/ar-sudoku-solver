@@ -26,7 +26,17 @@ def process(image: np.ndarray):
     show_image("field-bin", bin_field.image)
 
     # EXPERIMENTAL
-    detect_grid_points(bin_field)
+    grid = detect_grid_points(bin_field)
+    imgx = cv2.cvtColor(bin_field.image, cv2.COLOR_GRAY2BGR)
+    for x, y in grid.reshape((-1, 2)):
+        # cv2.circle(imgx, (x, y), 2, (0, 0, 255), -1)
+        pass
+    for i_row in range(9):
+        for i_col in range(9):
+            array = grid[i_row:i_row+2, i_col:i_col+2, :].reshape(-1, 2)
+            array[[2, 3]] = array[[3, 2]]
+            cv2.polylines(imgx, [array], isClosed=True, color=(0, 0, 255), thickness=2)
+    show_image("imgx", imgx)
 
     enforce_grid(bin_field)
     show_image("field-bin-enforced_grid", bin_field.image)
@@ -61,7 +71,8 @@ def process(image: np.ndarray):
     return number_bounding_boxes_by_cells
 
 
-image = load_image("../images/big-numbers.jpg")
+# image = load_image("../images/big-numbers.jpg")
+image = load_image("../images/sudoku-1.jpg")
 show_image("original_resized", image)
 process(image)
 print()
