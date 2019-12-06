@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from itertools import product
 
 import cv2
@@ -36,7 +36,7 @@ def clean_image(image: np.ndarray) -> np.ndarray:
     return image
 
 
-def cut_out_field(image: np.ndarray) -> (Field, Corners):
+def cut_out_field(image: np.ndarray) -> (Field, Corners, np.ndarray):
     bin_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     bin_image = cv2.adaptiveThreshold(
         bin_image, maxValue=255,
@@ -59,9 +59,9 @@ def cut_out_field(image: np.ndarray) -> (Field, Corners):
     # field_side = find_longest_edge_len(corners)
     field_side = 300
     margin = 10
-    field = warp_field(masked_field, corners, field_side, margin)
+    field, perspective_transform_matrix = warp_field(masked_field, corners, field_side, margin)
 
-    return Field(field, field_side, margin), corners
+    return Field(field, field_side, margin), corners, perspective_transform_matrix
 
 
 # def find_longest_edge_len(corners: Corners) -> int:
@@ -121,7 +121,7 @@ def show_corners(bin_image, corners: Corners):
     show_image("corners", color_image)
 
 
-def warp_field(image: np.ndarray, corners: Corners, field_side: int, margin: int) -> np.ndarray:
+def warp_field(image: np.ndarray, corners: Corners, field_side: int, margin: int) -> Tuple[np.ndarray, np.ndarray]:
     source = np.array([
         corners.top_left,
         corners.top_right,
@@ -133,13 +133,13 @@ def warp_field(image: np.ndarray, corners: Corners, field_side: int, margin: int
         [field_side + margin, 0 + margin],
         [field_side + margin, field_side + margin],
         [0 + margin, field_side + margin]], dtype="float32")
-    perspective_transform = cv2.getPerspectiveTransform(source, dest)
+    perspective_transform_matrix = cv2.getPerspectiveTransform(source, dest)
     warped = cv2.warpPerspective(
         image,
-        perspective_transform,
+        perspective_transform_matrix,
         (field_side + 2 * margin, field_side + 2 * margin),
     )
-    return warped
+    return warped, perspective_transform_matrix
 
 
 def binarize_field(field: Field) -> Field:
@@ -154,7 +154,7 @@ def binarize_field(field: Field) -> Field:
     return Field(bin_image, field.side, field.margin)
 
 
-def enforce_grid(bin_field: Field):
+def enforce_grid_simple(bin_field: Field):
     """
     Enforces the grid.
     Does modifications in place.
@@ -175,7 +175,15 @@ def enforce_grid(bin_field: Field):
             cv2.line(bin_field.image, (x1, y1), (x2, y2), 255, 1)
 
 
-def find_number_bounding_boxes(field: Field) -> List[BoundingBox]:
+def enforce_grid_detected(bin_field: Field, grid):
+    for i_row in range(9):
+        for i_col in range(9):
+            points = grid[i_row:i_row+2, i_col:i_col+2, :].reshape(-1, 2)
+            points[[2, 3]] = points[[3, 2]]
+            cv2.polylines(bin_field.image, [points], isClosed=True, color=255, thickness=1)
+
+
+def find_digit_bounding_boxes(field: Field) -> List[BoundingBox]:
     cell_side = field.side // 9
     result = []
     contours, _ = cv2.findContours(field.image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -192,7 +200,7 @@ def find_number_bounding_boxes(field: Field) -> List[BoundingBox]:
     return result
 
 
-def assign_number_bounding_boxes_to_cells(field: Field, bounding_boxes: List[BoundingBox]) -> List[BoundingBox]:
+def extract_digits_from_cells(field: Field, bounding_boxes: List[BoundingBox]) -> List[BoundingBox]:
     cell_side = field.side // 9
     result = [None] * 9 * 9
     for bb in bounding_boxes:

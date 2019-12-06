@@ -9,12 +9,12 @@ import numpy as np
 import sudoku
 from sudoku import Field
 from sudoku.solver import load_image, cut_out_field, show_image, clean_image, \
-    find_number_bounding_boxes, binarize_field, enforce_grid, draw_overlay
+    find_digit_bounding_boxes, binarize_field, enforce_grid, draw_overlay
 
 
 def find_number_mask(bin_field: Field):
     number_mask = np.full(bin_field.image.shape, 255, np.uint8)
-    for x, y, w, h in find_number_bounding_boxes(bin_field):
+    for x, y, w, h in find_digit_bounding_boxes(bin_field):
         cv2.rectangle(number_mask, (x, y), (x + w, y + h), 0, -1)
     return number_mask
 
@@ -111,51 +111,69 @@ def line_len_sq(a: Tuple[int, int], b: Tuple[int, int]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
+tracker = cv2.TrackerCSRT_create()
+
 # cap = cv2.VideoCapture(0)
 cap = cv2.VideoCapture("../images/VID_20191201_104129.mp4")
+found = False
 while True:
     frame_start = time.time()
     ret, frame = cap.read()
     if not ret:
         break
 
-    frame = cv2.resize(frame, (int(frame.shape[1] * 0.5), int(frame.shape[0] * 0.5)))
+    scale = 0.4
+    frame = cv2.resize(frame, (int(frame.shape[1] * scale), int(frame.shape[0] * scale)))
     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
     # cv2.imshow('frame', frame)
     frame = clean_image(frame)
     # cv2.imshow('frame-clean', frame)
 
-    field, corners = cut_out_field(frame)
-    if field is not None and field.side >= 100:
-        bin_field = binarize_field(field)
-        enforce_grid(bin_field)
-        number_mask = find_number_mask(bin_field)
-        field_no_numbers_image = cv2.bitwise_and(bin_field.image, number_mask)
-        # cv2.imshow('field_no_numbers_image', field_no_numbers_image)
-        field_no_numbers = Field(field_no_numbers_image, bin_field.side, bin_field.margin)
-        grid = find_grid(field_no_numbers)
+    out = frame.copy()
+    if not found:
+        field, corners, perspective_transform_matrix = cut_out_field(frame)
+        # tracker.init(frame, (corners.top_left[0], corners.top_left[1], corners.bottom_right[0], corners.bottom_right[1]))
+        # print(corners)
+        cv2.rectangle(out, tuple(corners.top_left), tuple(corners.bottom_right), 0, 1)
+        # found = True
+    else:
+        success, boxes = tracker.update(frame)
+        box = boxes[0]
+        print(boxes)
+        tl = (int(boxes[0]), int(boxes[1]))
+        br = (int(boxes[2]), int(boxes[3]))
+        cv2.rectangle(out, tl, br, 0, 1)
 
-        overlay = np.zeros([field.image.shape[0], field.image.shape[1], 3], dtype=np.uint8)
-        for i, point in enumerate(grid):
-            # cv2.putText(
-            #     overlay,
-            #     str(i),
-            #     org=point,
-            #     fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            #     fontScale=0.5,
-            #     color=(0, 255, 0),
-            #     lineType=2)
-            cv2.circle(overlay, point, radius=2, color=(0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
-        overlayed = draw_overlay(
-            frame,
-            overlay,
-            corners,
-            field.side, field.margin
-        )
-
-        cv2.imshow('in', frame)
-        cv2.imshow('out', overlayed)
+        # if field is not None and field.side >= 100:
+        #     bin_field = binarize_field(field)
+        #     enforce_grid(bin_field)
+        #     number_mask = find_number_mask(bin_field)
+        #     field_no_numbers_image = cv2.bitwise_and(bin_field.image, number_mask)
+        #     # cv2.imshow('field_no_numbers_image', field_no_numbers_image)
+        #     field_no_numbers = Field(field_no_numbers_image, bin_field.side, bin_field.margin)
+        #     grid = find_grid(field_no_numbers)
+        #
+        #     overlay = np.zeros([field.image.shape[0], field.image.shape[1], 3], dtype=np.uint8)
+        #     for i, point in enumerate(grid):
+        #         # cv2.putText(
+        #         #     overlay,
+        #         #     str(i),
+        #         #     org=point,
+        #         #     fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        #         #     fontScale=0.5,
+        #         #     color=(0, 255, 0),
+        #         #     lineType=2)
+        #         cv2.circle(overlay, point, radius=2, color=(0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
+        #     overlayed = draw_overlay(
+        #         frame,
+        #         overlay,
+        #         corners,
+        #         field.side, field.margin
+        #     )
+        #
+    cv2.imshow('in', frame)
+    cv2.imshow('out', out)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
