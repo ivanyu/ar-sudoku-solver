@@ -196,18 +196,21 @@ def find_digit_bounding_boxes(field: Field) -> List[BoundingBox]:
             continue
         if h < cell_side * 0.5:
             continue
+        # Filter out those which out of margin.
+        if x <= field.margin or x + w >= field.margin + field.side:
+            continue
         result.append(BoundingBox(x, y, w, h))
     return result
 
 
-def extract_digits_from_cells(field: Field, bounding_boxes: List[BoundingBox]) -> List[BoundingBox]:
+def assign_digit_bounding_boxes_to_cells(field: Field, bounding_boxes: List[BoundingBox]) -> List[BoundingBox]:
     cell_side = field.side // 9
     result = [None] * 9 * 9
     for bb in bounding_boxes:
-        x_cell = (bb.x - field.margin) // cell_side
-        y_cell = (bb.y - field.margin) // cell_side
-        assert result[y_cell * 9 + x_cell] is None
-        result[y_cell * 9 + x_cell] = field.image[bb.y:bb.y + bb.h, bb.x:bb.x + bb.w]
+        cell_col = (bb.x - field.margin) // cell_side
+        cell_row = (bb.y - field.margin) // cell_side
+        assert result[cell_row * 9 + cell_col] is None
+        result[cell_row * 9 + cell_col] = bb
     return result
 
 

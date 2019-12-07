@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import os
 import time
 import cv2
 import numpy as np
+import torch
 
 import sudoku
+from digit_recognizer import recognize_digits
 from sudoku.solver import load_image, show_image, cut_out_field, clean_image, \
     binarize_field, \
-    enforce_grid_simple, find_digit_bounding_boxes, extract_digits_from_cells, draw_overlay, \
-    detect_grid_points, \
-    warp_field, enforce_grid_detected
+    find_digit_bounding_boxes, draw_overlay, detect_grid_points, \
+    enforce_grid_detected, assign_digit_bounding_boxes_to_cells
 
 assert cv2.useOptimized()
 
@@ -97,94 +99,61 @@ def process(image: np.ndarray):
     show_image("field-bin-enforced_grid", bin_field.image)
 
     digit_bounding_boxes = find_digit_bounding_boxes(bin_field)
+    digit_bounding_boxes_by_cells = assign_digit_bounding_boxes_to_cells(field, digit_bounding_boxes)
 
-    if sudoku.DISPLAY:
-        num_viz = field.image.copy()
-        cell_side = bin_field.side // 9
-        for bb in digit_bounding_boxes:
-            x_cell = (bb.x - bin_field.margin) // cell_side
-            y_cell = (bb.y - bin_field.margin) // cell_side
-            cv2.rectangle(num_viz, (bb.x, bb.y), (bb.x + bb.w, bb.y + bb.h), (255, 0, 255), 2)
-            cv2.putText(num_viz, f"{x_cell}-{y_cell}",
-                        org=(bb.x, bb.y),
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.5,
-                        color=(0, 255, 0),
-                        lineType=2)
-        show_image("num_viz", num_viz)
-        draw_overlay(
-            image,
-            num_viz,
-            corners,
-            field.side, field.margin
-        )
-
-    number_patterns = []
-    for digit in range(10):
-        text = str(digit)
-        (w, h), baseline = cv2.getTextSize(
-            text,
-            fontFace=cv2.FONT_HERSHEY_DUPLEX,
-            fontScale=1,
-            thickness=1)
-        pattern = np.zeros(shape=(h + baseline // 2, w), dtype=np.uint8)
-        cv2.putText(pattern,
-                    text,
-                    org=(0, h + baseline // 4),
-                    fontFace=cv2.FONT_HERSHEY_DUPLEX,
-                    fontScale=1,
-                    color=255,
-                    thickness=1)
-        number_patterns.append(pattern)
-        show_image(text, pattern)
-    pattern_shape = number_patterns[0].shape
-    for pattern in number_patterns:
-        assert pattern.shape == pattern_shape
-
-    digits = extract_digits_from_cells(bin_field, digit_bounding_boxes)
-    for i, digit in enumerate(digits):
-        if digit is None:
+    digits_for_recog = []
+    digits_for_recog_coords = []
+    for i, bbox in enumerate(digit_bounding_boxes_by_cells):
+        if bbox is None:
             continue
+
+        digit = bin_field.image[bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w]
 
         i_row = i // 9
         i_col = i % 9
 
-        digit = cv2.copyMakeBorder(digit, 3, 2, 0, 0, cv2.BORDER_CONSTANT)
-        scale_coeff = float(pattern_shape[0]) / digit.shape[0]
-        digit = cv2.resize(digit, dsize=(int(digit.shape[1] * scale_coeff), pattern_shape[0]))
-        h_diff = pattern_shape[1] - digit.shape[1]
-        digit = cv2.copyMakeBorder(digit, 0, 0, h_diff // 2, h_diff - h_diff // 2, cv2.BORDER_CONSTANT)
-        assert digit.shape == pattern.shape
+        digit = cv2.morphologyEx(digit, cv2.MORPH_CLOSE,
+                                 cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1)))
 
-        max_score = float("-inf")
-        max_score_digit = -1
-        for pattern_digit, pattern in enumerate(number_patterns):
-            assert pattern.shape == digit.shape
-            r = cv2.matchTemplate(digit, pattern, cv2.TM_CCOEFF)
-            r = r[0, 0]
-            if r > max_score:
-                max_score = r
-                max_score_digit = pattern_digit
-        print(max_score_digit)
-    # for pattern in number_patterns:
+        digit = cv2.copyMakeBorder(digit, 4, 4, 4, 4, cv2.BORDER_CONSTANT)
+        target_h = 28
+        target_w = 28
+        scale = float(target_h) / digit.shape[0]
+        digit = cv2.resize(digit, dsize=(int(digit.shape[1] * scale), target_h))
+        w_diff = target_w - digit.shape[1]
+        assert w_diff >= 0
+        digit = cv2.copyMakeBorder(digit, 0, 0, w_diff // 2, w_diff - (w_diff // 2), cv2.BORDER_CONSTANT)
+        digits_for_recog.append(digit[np.newaxis, :, :])
+        digits_for_recog_coords.append((i_row, i_col))
 
+    digits_for_recog = np.vstack(digits_for_recog)
+    labels = recognize_digits(digits_for_recog)
+    num_viz = field.image.copy()
+    for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
+        bbox = digit_bounding_boxes_by_cells[i_row * 9 + i_col]
+        cv2.rectangle(num_viz, (bbox.x, bbox.y), (bbox.x + bbox.w, bbox.y + bbox.h), (255, 0, 255), 2)
+        cv2.putText(num_viz, str(labels[i]),
+                    org=(bbox.x, bbox.y),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    color=(0, 255, 0),
+                    lineType=2)
 
-    # pattern = np.zeros(shape=(30, 30), dtype=np.uint8)
-    # cv2.putText(pattern, "1",
-    #             org=(0, 30),
-    #             fontFace=cv2.FONT_HERSHEY_TRIPLEX,
-    #             fontScale=1,
-    #             color=255,
-    #             thickness=2)
-
+    show_image("num_viz", num_viz)
+    draw_overlay(
+        image,
+        num_viz,
+        corners,
+        field.side, field.margin
+    )
 
     print('ms per frame:', (time.time() - time_start) * 1000)
 
-    return digits
+    return digit_bounding_boxes_by_cells
 
 
-# image = load_image("../images/big-numbers.jpg")
-image = load_image("../images/sudoku.jpg")
+sudoku_file = "sudoku-2-rotated.jpg"
+image = load_image(os.path.join("../images/", sudoku_file))
 show_image("original_resized", image)
 process(image)
 print()

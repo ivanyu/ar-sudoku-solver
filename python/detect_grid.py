@@ -6,10 +6,9 @@ from typing import Tuple
 import cv2
 import numpy as np
 
-import sudoku
 from sudoku import Field
 from sudoku.solver import load_image, cut_out_field, show_image, clean_image, \
-    find_digit_bounding_boxes, binarize_field, enforce_grid, draw_overlay
+    find_digit_bounding_boxes
 
 
 def find_number_mask(bin_field: Field):

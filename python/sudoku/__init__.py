@@ -9,3 +9,4 @@ Field = namedtuple('Field', 'image side margin')
 BoundingBox = namedtuple('BoundingBox', 'x y w h')
 
 DISPLAY = True
+# DISPLAY = False
