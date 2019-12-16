@@ -1,17 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import os
 import time
 import cv2
 import numpy as np
-import torch
-
 import sudoku
 from digit_recognizer import recognize_digits
+from solver import solve
 from sudoku.solver import load_image, show_image, cut_out_field, clean_image, \
     binarize_field, \
     find_digit_bounding_boxes, draw_overlay, detect_grid_points, \
     enforce_grid_detected, assign_digit_bounding_boxes_to_cells
+
 
 assert cv2.useOptimized()
 
@@ -34,8 +33,8 @@ def process(image: np.ndarray):
     imgx = cv2.cvtColor(bin_field.image, cv2.COLOR_GRAY2BGR)
     # overlay_flat = np.zeros(shape=(field.image.shape[0], field.image.shape[1], 4), dtype=np.uint8)
 
-    # for x, y in grid.reshape((-1, 2)):
-    #     cv2.circle(imgx, (x, y), 2, (0, 0, 255), -1)
+    # for h, y in grid.reshape((-1, 2)):
+    #     cv2.circle(imgx, (h, y), 2, (0, 0, 255), -1)
     #     pass
 
     # for i_row in range(9):
@@ -49,7 +48,7 @@ def process(image: np.ndarray):
     #         contours, _ = cv2.findContours(cell_image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     #         bb = None
     #         for contour in contours:
-    #             x, y, w, h = cv2.boundingRect(contour)
+    #             h, y, w, h = cv2.boundingRect(contour)
     #             # Filter out too big and too small.
     #             if h > cell_side_h * 0.9 or w > cell_side_w * 0.9:
     #                 continue
@@ -57,13 +56,13 @@ def process(image: np.ndarray):
     #                 continue
     #             if h < cell_side_h * 0.5:
     #                 continue
-    #             bb = sudoku.BoundingBox(x, y, w, h)
+    #             bb = sudoku.BoundingBox(h, y, w, h)
     #             break
     #         if bb is not None:
     #             cv2.rectangle(
     #                 overlay_flat,
-    #                 (top_left_x + bb.x, top_left_y + bb.y),
-    #                 (top_left_x + bb.x + bb.w, top_left_y + bb.y + bb.h),
+    #                 (top_left_x + bb.h, top_left_y + bb.y),
+    #                 (top_left_x + bb.h + bb.w, top_left_y + bb.y + bb.h),
     #                 color=(255, 0, 255, 255),
     #                 thickness=1,
     #                 lineType=cv2.LINE_AA)
@@ -98,19 +97,21 @@ def process(image: np.ndarray):
     #         cv2.polylines(bin_field.image, [array], isClosed=True, color=255, thickness=1)
     show_image("field-bin-enforced_grid", bin_field.image)
 
+    num_viz = field.image.copy()
+
     digit_bounding_boxes = find_digit_bounding_boxes(bin_field)
     digit_bounding_boxes_by_cells = assign_digit_bounding_boxes_to_cells(field, digit_bounding_boxes)
 
     digits_for_recog = []
     digits_for_recog_coords = []
     for i, bbox in enumerate(digit_bounding_boxes_by_cells):
+        i_row = i // 9
+        i_col = i % 9
+
         if bbox is None:
             continue
 
         digit = bin_field.image[bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w]
-
-        i_row = i // 9
-        i_col = i % 9
 
         digit = cv2.morphologyEx(digit, cv2.MORPH_CLOSE,
                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1)))
@@ -128,8 +129,9 @@ def process(image: np.ndarray):
 
     digits_for_recog = np.vstack(digits_for_recog)
     labels = recognize_digits(digits_for_recog)
-    num_viz = field.image.copy()
+    unsolved_field = np.zeros(shape=(9, 9), dtype=np.uint8)
     for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
+        unsolved_field[i_row, i_col] = labels[i]
         bbox = digit_bounding_boxes_by_cells[i_row * 9 + i_col]
         cv2.rectangle(num_viz, (bbox.x, bbox.y), (bbox.x + bbox.w, bbox.y + bbox.h), (255, 0, 255), 2)
         cv2.putText(num_viz, str(labels[i]),
@@ -138,6 +140,31 @@ def process(image: np.ndarray):
                     fontScale=0.5,
                     color=(0, 255, 0),
                     lineType=2)
+
+    solved_field = solve(unsolved_field)
+    assert solved_field is not None
+
+    for i_row in range(9):
+        for i_col in range(9):
+            if unsolved_field[i_row, i_col] == 0:
+                cell_side = field.side // 9
+                text = str(solved_field[i_row, i_col])
+                font_scale = 0.8
+                (text_w, text_h), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale, thickness=1)
+                margin_x = (cell_side - text_w) // 2
+                margin_y = (cell_side - text_h) // 2
+                cv2.rectangle(num_viz,
+                              (field.margin + i_col * cell_side, field.margin + i_row * cell_side),
+                              (field.margin + (i_col + 1) * cell_side, field.margin + (i_row + 1) * cell_side),
+                              (0, 0, 255),
+                              2)
+                cv2.putText(num_viz, text,
+                            org=(field.margin + i_col * cell_side + margin_x, field.margin + (i_row + 1) * cell_side - margin_y),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=font_scale,
+                            thickness=1,
+                            color=(0, 0, 0, 255),
+                            lineType=cv2.LINE_AA)
 
     show_image("num_viz", num_viz)
     draw_overlay(
@@ -152,8 +179,7 @@ def process(image: np.ndarray):
     return digit_bounding_boxes_by_cells
 
 
-sudoku_file = "sudoku-2-rotated.jpg"
-image = load_image(os.path.join("../images/", sudoku_file))
+image = load_image("../images/sudoku.jpg")
 show_image("original_resized", image)
 process(image)
 print()
