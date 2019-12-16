@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 
 from digit_recognizer import recognize_digits
+from solver import solve
 from sudoku import Corners, Field
 from sudoku.solver import clean_image, cut_out_field, binarize_field, detect_grid_points, find_digit_bounding_boxes, \
     enforce_grid_detected, assign_digit_bounding_boxes_to_cells
@@ -29,13 +30,20 @@ def create_flat_overlay(field: Field, corners: Corners):
     digits_for_recog = []
     digits_for_recog_coords = []
     for i, bbox in enumerate(digit_bounding_boxes_by_cells):
-        if bbox is None:
-            continue
-
-        digit = bin_field.image[bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w]
-
         i_row = i // 9
         i_col = i % 9
+
+        if bbox is None:
+            continue
+            # cell_side = field.side // 9
+            # cv2.putText(overlay, "0",
+            #             org=(field.margin + i_col * cell_side + cell_side // 4, field.margin + i_row * cell_side + cell_side - cell_side // 8),
+            #             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            #             fontScale=1,
+            #             color=(255, 255, 255, 255),
+            #             lineType=cv2.LINE_AA)
+
+        digit = bin_field.image[bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w]
 
         digit = cv2.morphologyEx(digit, cv2.MORPH_CLOSE,
                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1)))
@@ -53,15 +61,38 @@ def create_flat_overlay(field: Field, corners: Corners):
 
     digits_for_recog = np.vstack(digits_for_recog)
     labels = recognize_digits(digits_for_recog)
+    unsolved_field = np.zeros(shape=(9, 9), dtype=np.uint8)
     for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
-        bbox = digit_bounding_boxes_by_cells[i_row * 9 + i_col]
-        cv2.rectangle(overlay, (bbox.x, bbox.y), (bbox.x + bbox.w, bbox.y + bbox.h), (255, 0, 255, 255), lineType=cv2.LINE_AA)
-        cv2.putText(overlay, str(labels[i]),
-                    org=(bbox.x + 20, bbox.y + 15),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=0.5,
-                    color=(0, 255, 255, 255),
-                    lineType=cv2.LINE_AA)
+        unsolved_field[i_row, i_col] = labels[i]
+        # bbox = digit_bounding_boxes_by_cells[i_row * 9 + i_col]
+        # cv2.rectangle(overlay, (bbox.x, bbox.y), (bbox.x + bbox.w, bbox.y + bbox.h), (255, 0, 255, 255), lineType=cv2.LINE_AA)
+        # cv2.putText(overlay, str(labels[i]),
+        #             org=(bbox.x + 20, bbox.y + 15),
+        #             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        #             fontScale=0.5,
+        #             color=(0, 255, 255, 255),
+        #             lineType=cv2.LINE_AA)
+
+    solved_field = solve(unsolved_field)
+    assert solved_field is not None
+
+    for i_row in range(9):
+        for i_col in range(9):
+            if unsolved_field[i_row, i_col] == 0:
+                cell_side = field.side // 9
+                text = str(solved_field[i_row, i_col])
+                font_scale = 0.8
+                (text_w, text_h), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale, thickness=1)
+                margin_x = (cell_side - text_w) // 2
+                margin_y = (cell_side - text_h) // 2
+                cv2.putText(overlay, text,
+                            org=(field.margin + i_col * cell_side + margin_x, field.margin + (i_row + 1) * cell_side - margin_y),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=font_scale,
+                            thickness=1,
+                            color=(0, 0, 200, 255),
+                            lineType=cv2.LINE_AA)
+
     return overlay
 
 
@@ -97,6 +128,8 @@ cap = cv2.VideoCapture("../images/VID_20191204_201215.mp4")
 # input_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * INPUT_SCALE)
 input_width = 640
 input_height = 360
+input_width = 800
+input_height = 450
 
 prev_corners: Corners = None
 prev_flat_overlay = None
