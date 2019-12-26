@@ -9,8 +9,7 @@ from solver import solve
 from sudoku.solver import load_image, show_image, cut_out_field, clean_image, \
     binarize_field, \
     find_digit_bounding_boxes, draw_overlay, detect_grid_points, \
-    enforce_grid_detected, assign_digit_bounding_boxes_to_cells
-
+    enforce_grid_detected, assign_digit_bounding_boxes_to_cells, resize_image
 
 assert cv2.useOptimized()
 
@@ -19,9 +18,9 @@ def process(image: np.ndarray):
     time_start = time.time()
 
     image = clean_image(image)
-    show_image("cleaned", image)
+    show_image("cleaned resized", resize_image(image))
 
-    field, corners, perspective_transform_matrix = cut_out_field(image)
+    field, _, corners, perspective_transform_matrix = cut_out_field(image)
     assert field is not None
     show_image("field", field.image)
 
@@ -33,9 +32,9 @@ def process(image: np.ndarray):
     imgx = cv2.cvtColor(bin_field.image, cv2.COLOR_GRAY2BGR)
     # overlay_flat = np.zeros(shape=(field.image.shape[0], field.image.shape[1], 4), dtype=np.uint8)
 
-    # for h, y in grid.reshape((-1, 2)):
-    #     cv2.circle(imgx, (h, y), 2, (0, 0, 255), -1)
-    #     pass
+    for h, y in grid.reshape((-1, 2)):
+        cv2.circle(imgx, (h, y), 2, (0, 0, 255), -1)
+        pass
 
     # for i_row in range(9):
     #     for i_col in range(9):
@@ -68,7 +67,7 @@ def process(image: np.ndarray):
     #                 lineType=cv2.LINE_AA)
     #
     #     pass
-    # show_image("imgx", imgx)
+    show_image("imgx", imgx)
     # show_image("overlay_flat", overlay_flat)
     # # show_image("overlay_mask", overlay_mask)
     #
@@ -179,8 +178,8 @@ def process(image: np.ndarray):
     return digit_bounding_boxes_by_cells
 
 
-image = load_image("../images/sudoku.jpg")
-show_image("original_resized", image)
+image = load_image("../images/slightly_blurry.jpg")
+show_image("original resized", resize_image(image))
 process(image)
 print()
 

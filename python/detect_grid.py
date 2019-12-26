@@ -131,7 +131,7 @@ while True:
 
     out = frame.copy()
     if not found:
-        field, corners, perspective_transform_matrix = cut_out_field(frame)
+        field, _, corners, perspective_transform_matrix = cut_out_field(frame)
         # tracker.init(frame, (corners.top_left[0], corners.top_left[1], corners.bottom_right[0], corners.bottom_right[1]))
         # print(corners)
         cv2.rectangle(out, tuple(corners.top_left), tuple(corners.bottom_right), 0, 1)

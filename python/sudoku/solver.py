@@ -5,19 +5,18 @@ from itertools import product
 import cv2
 import numpy as np
 
-from sudoku import Corners, Field, DISPLAY, BoundingBox
+from sudoku import Corners, Field, BoundingBox
+from utils import show_image
 
 MAX_INITIAL_IMAGE_SIZE = 500
 
 
-def show_image(window_name: str, image: np.ndarray):
-    if not DISPLAY:
-        return
-    cv2.imshow(window_name, image)
-
-
 def load_image(filename: str) -> np.ndarray:
     image = cv2.imread(filename)
+    return image
+
+
+def resize_image(image: np.ndarray) -> np.ndarray:
     max_dim = max(image.shape)
     if max_dim > MAX_INITIAL_IMAGE_SIZE:
         coeff = float(MAX_INITIAL_IMAGE_SIZE) / max_dim
@@ -36,32 +35,49 @@ def clean_image(image: np.ndarray) -> np.ndarray:
     return image
 
 
-def cut_out_field(image: np.ndarray) -> (Field, Corners, np.ndarray):
-    bin_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    bin_image = cv2.adaptiveThreshold(
-        bin_image, maxValue=255,
-        adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        thresholdType=cv2.THRESH_BINARY_INV,
-        blockSize=15,
-        C=6)
+def cut_out_field(image: np.ndarray) -> (Field, np.ndarray, Corners, np.ndarray):
+    if len(image.shape) == 2:
+        bin_image = image
+    else:
+        bin_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        bin_image = cv2.adaptiveThreshold(
+            bin_image, maxValue=255,
+            adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            thresholdType=cv2.THRESH_BINARY_INV,
+            blockSize=55,
+            C=6)
+    # show_image("bin_image", bin_image, 600)
 
     field_contour = find_field_contour(bin_image)
-    if field_contour is None or len(field_contour.shape) < 2:
+    if field_contour is None or len(field_contour.shape) < 3:
         return None, None
 
-    corners = find_field_corners(field_contour)
+    (top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx) = find_field_corners(field_contour)
+    corners = Corners(
+        field_contour[top_left_idx],
+        field_contour[top_right_idx],
+        field_contour[bottom_right_idx],
+        field_contour[bottom_left_idx],
+    )
     # show_corners(bin_image, corners)
 
     mask = np.zeros(bin_image.shape, np.uint8)
     cv2.drawContours(mask, [field_contour], 0, 255, -1)
+    # show_image("mask", mask, 400)
+
     masked_field = cv2.bitwise_and(image, image, mask=mask)
+
+    mask = cv2.bitwise_not(mask, mask)
+    border = cv2.bitwise_or(masked_field, cv2.merge([mask, mask, mask]), mask=mask)
+    masked_field = cv2.bitwise_or(masked_field, border)
 
     # field_side = find_longest_edge_len(corners)
     field_side = 300
     margin = 10
     field, perspective_transform_matrix = warp_field(masked_field, corners, field_side, margin)
+    # show_image("field", field)
 
-    return Field(field, field_side, margin), corners, perspective_transform_matrix
+    return Field(field, field_side, margin), field_contour, corners, perspective_transform_matrix
 
 
 # def find_longest_edge_len(corners: Corners) -> int:
@@ -87,27 +103,21 @@ def find_field_contour(bin_image: np.ndarray) -> Optional[np.ndarray]:
     if not contours:
         return None
     largest_area_contour: np.ndarray = max(contours, key=cv2.contourArea)
-    largest_area_contour = largest_area_contour.squeeze()  # remove unnecessary dimension
     return largest_area_contour
 
 
-def find_field_corners(field_contour: np.ndarray) -> Corners:
-    coord_sums = field_contour.sum(axis=1)
+def find_field_corners(field_contour: np.ndarray) -> (int, int, int, int):
+    coord_sums = field_contour.sum(axis=2)
     top_left_idx = np.argmin(coord_sums)
     bottom_right_idx = np.argmax(coord_sums)
 
     # Diff between y and x. The top-right will have the minimum difference,
     # the bottom-left, the maximum.
-    diff = np.diff(field_contour, axis=1)
+    diff = np.diff(field_contour, axis=2)
     top_right_idx = np.argmin(diff)
     bottom_left_idx = np.argmax(diff)
 
-    return Corners(
-        field_contour[top_left_idx],
-        field_contour[top_right_idx],
-        field_contour[bottom_right_idx],
-        field_contour[bottom_left_idx],
-    )
+    return top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx
 
 
 def show_corners(bin_image, corners: Corners):
@@ -127,17 +137,19 @@ def warp_field(image: np.ndarray, corners: Corners, field_side: int, margin: int
         corners.top_right,
         corners.bottom_right,
         corners.bottom_left
-    ], dtype="float32")
+    ], dtype=np.float32)
     dest = np.array([
         [0 + margin, 0 + margin],
         [field_side + margin, 0 + margin],
         [field_side + margin, field_side + margin],
-        [0 + margin, field_side + margin]], dtype="float32")
+        [0 + margin, field_side + margin]], dtype=np.float32)
     perspective_transform_matrix = cv2.getPerspectiveTransform(source, dest)
     warped = cv2.warpPerspective(
         image,
         perspective_transform_matrix,
         (field_side + 2 * margin, field_side + 2 * margin),
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(255, 255, 255)
     )
     return warped, perspective_transform_matrix
 
