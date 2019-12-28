@@ -80,6 +80,7 @@ def cut_out_field(image: np.ndarray) -> (Field, np.ndarray, Corners, np.ndarray)
     return Field(field, field_side, margin), field_contour, corners, perspective_transform_matrix
 
 
+
 # def find_longest_edge_len(corners: Corners) -> int:
 #     def line_len_sq(a, b) -> int:
 #         return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
@@ -152,6 +153,20 @@ def warp_field(image: np.ndarray, corners: Corners, field_side: int, margin: int
         borderValue=(255, 255, 255)
     )
     return warped, perspective_transform_matrix
+
+
+def perspective_transform_contour(contour: np.ndarray, perspective_transform_matrix: np.ndarray) -> np.ndarray:
+    r = cv2.perspectiveTransform(contour.astype(np.float64), perspective_transform_matrix)
+    return r.astype(np.int)
+
+
+def extract_subcontour(contour: np.ndarray, idx_from: int, idx_to: int):
+    if idx_from < idx_to:
+        r = contour[idx_from:idx_to + 1]
+    else:
+        r = np.vstack([contour[idx_from:], contour[:idx_to + 1]])
+    r = r.squeeze()
+    return r
 
 
 def binarize_field(field: Field) -> Field:

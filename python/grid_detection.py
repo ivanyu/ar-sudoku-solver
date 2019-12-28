@@ -10,13 +10,13 @@ from scipy.interpolate import griddata
 from border_mapper import BorderMapper
 from digit_recognizer import recognize_digits
 from solver import solve
-from sudoku.solver import load_image, cut_out_field, find_field_corners
-from utils import show_image, wait_windows, scale_image, get_line_coeffs
+from sudoku.solver import load_image, cut_out_field, find_field_corners, perspective_transform_contour, \
+    extract_subcontour
+from utils import show_image, wait_windows, scale_image
 
+_GRID_LINES = 10
 
-GRID_LINES = 10
-
-VIZUALIZE = True
+_VIZUALIZE = True
 
 
 # image = load_image("../images/big-numbers.jpg")
@@ -27,10 +27,10 @@ VIZUALIZE = True
 # image = load_image("../images/sudoku-2.jpg")
 # image = load_image("../images/sudoku-2-rotated.jpg")
 image = load_image("../images/warped.jpg")
-# if VIZUALIZE:
+# if _VIZUALIZE:
 #     show_image("orig", image)
 
-# image = scale_image(image, 640)
+image = scale_image(image, 640)
 
 
 t = time.time()
@@ -38,13 +38,8 @@ t = time.time()
 # Extract the field, its contour and corners.
 field, field_contour, field_corners, perspective_transform_matrix = cut_out_field(image)
 
-# Recalculate the contour and the corners on the perspectively transformed image.
-transformed_field_contour = cv2.perspectiveTransform(np.float_(field_contour), perspective_transform_matrix)
-transformed_field_contour = np.int0(transformed_field_contour)
-top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx = find_field_corners(transformed_field_contour)
-
 field_gray = cv2.cvtColor(field.image, cv2.COLOR_BGR2GRAY)
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("field_gray", field_gray)
 
 # Adjust brightness.
@@ -53,7 +48,7 @@ field_gray_closed = cv2.morphologyEx(
     cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
 field_gray_adj = np.divide(field_gray, field_gray_closed)
 field_gray = cv2.normalize(field_gray_adj, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("field_gray adj", field_gray)
 
 # Binarize the field.
@@ -63,7 +58,7 @@ bin_field = cv2.adaptiveThreshold(
     thresholdType=cv2.THRESH_BINARY_INV,
     blockSize=17,
     C=11)
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("bin_field", bin_field)
 
 # field_viz = cv2.cvtColor(field_gray, cv2.COLOR_GRAY2BGR)
@@ -85,7 +80,7 @@ for contour in contours:
 
 # field_gray = cv2.GaussianBlur(field_gray, (7, 7), 0)
 
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("field_gray no numbers", field_gray)
 
 # Apply the Sobel operator of 2nd degree to both directions.
@@ -97,7 +92,7 @@ grad_y = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=0, dy=2, ksize=7, scale=1, 
 np.clip(grad_y, a_min=0, a_max=grad_y.max(), out=grad_y)
 grad_y = cv2.normalize(grad_y, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
 
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("grad_x", grad_x)
     show_image("grad_y", grad_y)
 
@@ -184,7 +179,7 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
         if frac > 0.01:
             detected_windows.append((x, y, frac))
 
-    assert len(detected_windows) >= GRID_LINES
+    assert len(detected_windows) >= _GRID_LINES
 
     cluster_starts = [0]
     for i in range(1, len(detected_windows)):
@@ -194,7 +189,7 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
         # print(detected_windows[i])
 
     # print(cluster_starts)
-    assert len(cluster_starts) == GRID_LINES
+    assert len(cluster_starts) == _GRID_LINES
 
     win_h = 5
     win_w = cell_side // 4
@@ -206,7 +201,7 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
             windows = detected_windows[cluster_starts[i]:]
 
         x, y, _ = max(windows, key=lambda w: w[2])
-        # if VIZUALIZE:
+        # if _VIZUALIZE:
         #     cv2.rectangle(viz, (x, y - 3), (x + win_w, y + 3), color=(0, 255, 0), thickness=1)
         line = detect_line(work_image, x, y, win_h, win_w, right_limit)
 
@@ -232,28 +227,24 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
 
 
 # Find the left and the top borders.
+
+# Recalculate the contour and the corners on the perspective transformed image.
+transformed_field_contour = perspective_transform_contour(field_contour, perspective_transform_matrix)
+top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx = find_field_corners(transformed_field_contour)
+
 # In the contour, points go counterclockwise.
 # Top border: top right -> top left
 # Right border: bottom right -> top right
 # Bottom border: bottom left -> bottom right
 # Left border: top left -> bottom left
-def extract_border(idx_from, idx_to):
-    if idx_from < idx_to:
-        r = transformed_field_contour[idx_from:idx_to + 1]
-    else:
-        r = np.vstack([transformed_field_contour[idx_from:], transformed_field_contour[:idx_to + 1]])
-    r = r.squeeze()
-    return r
-
-
-top_border = extract_border(top_right_idx, top_left_idx)
+top_border = extract_subcontour(transformed_field_contour, top_right_idx, top_left_idx)
 # Change points order so they go from the top left corner.
 top_border = np.flip(top_border, axis=0)
 # Swap x and y.
 top_border = np.flip(top_border, axis=1)
 # right_border = extract_border(bottom_right_idx, top_right_idx)
 # bottom_border = extract_border(bottom_left_idx, bottom_right_idx)
-left_border = extract_border(top_left_idx, bottom_left_idx)
+left_border = extract_subcontour(transformed_field_contour, top_left_idx, bottom_left_idx)
 
 field_viz = cv2.cvtColor(field_gray, cv2.COLOR_GRAY2BGR)
 cv2.rotate(field_viz, cv2.ROTATE_90_COUNTERCLOCKWISE, dst=field_viz)
@@ -264,34 +255,34 @@ vertical_lines = detect_lines(
     top_border_mapper,
     field.margin + field.side
 )
-assert len(vertical_lines) == GRID_LINES
+assert len(vertical_lines) == _GRID_LINES
 
-vertical_lines_masks = np.zeros(shape=(GRID_LINES, field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
+vertical_lines_masks = np.zeros(shape=(_GRID_LINES, field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
 for i, line in enumerate(vertical_lines):
     poly = [np.array(line, np.int32)]
-    # if VIZUALIZE:
+    # if _VIZUALIZE:
     #     for x, y in line:
     #         cv2.circle(field_viz, (x, y), 0, (0, 0, 255), 2)
     #     cv2.polylines(field_viz, poly, isClosed=False, color=(0, 0, 255), thickness=1)
 
     # Invert the index: the first in the rotated image is the last by the normal order.
-    inv_i = GRID_LINES - i - 1
+    inv_i = _GRID_LINES - i - 1
     cv2.polylines(vertical_lines_masks[inv_i], poly, isClosed=False, color=255, thickness=1)
 
 # TODO rotate lines before drawing
 vertical_lines_masks = np.rot90(vertical_lines_masks, k=-1, axes=(1, 2))
 
-if VIZUALIZE:
+if _VIZUALIZE:
     cv2.rotate(field_viz, cv2.ROTATE_90_CLOCKWISE, dst=field_viz)
 
 left_border_mapper = BorderMapper(left_border)
 horizontal_lines = detect_lines(grad_y, left_border_mapper, field.margin + field.side)
-assert len(horizontal_lines) == GRID_LINES
+assert len(horizontal_lines) == _GRID_LINES
 
-horizontal_lines_masks = np.zeros(shape=(GRID_LINES, field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
+horizontal_lines_masks = np.zeros(shape=(_GRID_LINES, field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
 for i, line in enumerate(horizontal_lines):
     poly = [np.array(line, np.int32)]
-    # if VIZUALIZE:
+    # if _VIZUALIZE:
     #     for x, y in line:
     #         cv2.circle(field_viz, (x, y), 0, (255, 255, 0), 2)
     #     cv2.polylines(field_viz, poly, isClosed=False, color=(255, 255, 0), thickness=1)
@@ -299,13 +290,13 @@ for i, line in enumerate(horizontal_lines):
 
 # # TODO ? intersect one horizontal with all vertical
 intersection = np.zeros(shape=(field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
-grid_points = np.zeros(shape=(GRID_LINES, GRID_LINES, 2), dtype=np.uint32)
+grid_points = np.zeros(shape=(_GRID_LINES, _GRID_LINES, 2), dtype=np.uint32)
 
 src_points = []
 dst_points = []
 
-for i_row in range(GRID_LINES):
-    for i_col in range(GRID_LINES):
+for i_row in range(_GRID_LINES):
+    for i_col in range(_GRID_LINES):
         np.bitwise_and(horizontal_lines_masks[i_row], vertical_lines_masks[i_col], out=intersection)
         intersection_points = np.argwhere(intersection == 255)
 
@@ -318,7 +309,7 @@ for i_row in range(GRID_LINES):
         src_points.append(intersection_points[0])
         dst_points.append((i_row * cell_side, i_col * cell_side))
 
-        if VIZUALIZE:
+        if _VIZUALIZE:
             y, x = intersection_points[0]
             cv2.circle(field_viz, (x, y), radius=1, color=(100, 100, 255), thickness=-1)
             # cv2.putText(field_viz,
@@ -336,15 +327,15 @@ map_y = np.append([], [ar[:, 0] for ar in grid_z]).reshape(field.side, field.sid
 map_x_32 = map_x.astype('float32')
 map_y_32 = map_y.astype('float32')
 
-if VIZUALIZE:
+if _VIZUALIZE:
     unwrapped_viz = cv2.remap(field.image, map_x_32, map_y_32, cv2.INTER_CUBIC)
 
 unwrapped_bin = cv2.remap(bin_field, map_x_32, map_y_32, cv2.INTER_CUBIC)
 
 digits_for_recog = []
 digits_for_recog_coords = []
-for i_row in range(GRID_LINES - 1):
-    for i_col in range(GRID_LINES - 1):
+for i_row in range(_GRID_LINES - 1):
+    for i_col in range(_GRID_LINES - 1):
         recognize_side = 28
         assert cell_side >= recognize_side
         margin_1 = (cell_side - recognize_side) // 2
@@ -367,7 +358,7 @@ labels = recognize_digits(digits_for_recog)
 unsolved_field = np.zeros(shape=(9, 9), dtype=np.uint8)
 for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
     unsolved_field[i_row, i_col] = labels[i]
-    # if VIZUALIZE:
+    # if _VIZUALIZE:
     #     label = str(labels[i])
     #     cv2.putText(unwrapped_viz, label,
     #                 org=(i_col * cell_side, (i_row + 1) * cell_side),
@@ -387,37 +378,33 @@ for i_row in range(9):
             font_scale = 0.8
             (text_w, text_h), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale,
                                                          thickness=1)
-            # cv2.rectangle(unwrapped_viz,
-            #               (i_col * cell_side, i_row * cell_side),
-            #               ((i_col + 1) * cell_side, (i_row + 1) * cell_side),
-            #               (0, 0, 255),
-            #               2)
-            margin_x = (cell_side - text_w) // 2
-            margin_y = (cell_side - text_h) // 2
-            cv2.putText(unwrapped_viz, text,
-                        org=(
-                        i_col * cell_side + margin_x, (i_row + 1) * cell_side - margin_y),
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=font_scale,
-                        thickness=1,
-                        color=(0, 255, 0, 255),
-                        lineType=cv2.LINE_AA)
+            if _VIZUALIZE:
+                margin_x = (cell_side - text_w) // 2
+                margin_y = (cell_side - text_h) // 2
+                cv2.putText(unwrapped_viz, text,
+                            org=(
+                            i_col * cell_side + margin_x, (i_row + 1) * cell_side - margin_y),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=font_scale,
+                            thickness=1,
+                            color=(0, 255, 0, 255),
+                            lineType=cv2.LINE_AA)
 
-grid_x, grid_y = np.mgrid[0:field.side + field.margin * 2, 0:field.side + field.margin * 2]
-grid_z = griddata(np.array(src_points), np.array(dst_points), (grid_x, grid_y), method='cubic')
-map_x = np.append([], [ar[:, 1] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
-map_y = np.append([], [ar[:, 0] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
-map_x_32 = map_x.astype('float32')
-map_y_32 = map_y.astype('float32')
-wrapped_viz = cv2.remap(unwrapped_viz, map_x_32, map_y_32, cv2.INTER_CUBIC)
+# grid_x, grid_y = np.mgrid[0:field.side + field.margin * 2, 0:field.side + field.margin * 2]
+# grid_z = griddata(np.array(src_points), np.array(dst_points), (grid_x, grid_y), method='cubic')
+# map_x = np.append([], [ar[:, 1] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
+# map_y = np.append([], [ar[:, 0] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
+# map_x_32 = map_x.astype('float32')
+# map_y_32 = map_y.astype('float32')
+# wrapped_viz = cv2.remap(unwrapped_viz, map_x_32, map_y_32, cv2.INTER_CUBIC)
 
 
 print((time.time() - t) * 1000)
 
-if VIZUALIZE:
+if _VIZUALIZE:
     show_image("unwrapped", unwrapped_viz)
-    show_image("wrapped back", wrapped_viz)
+    # show_image("wrapped back", wrapped_viz)
     show_image("field_viz", field_viz, 700)
 
-if VIZUALIZE:
+if _VIZUALIZE:
     wait_windows()
