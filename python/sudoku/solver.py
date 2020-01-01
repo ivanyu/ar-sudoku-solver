@@ -52,7 +52,7 @@ def cut_out_field(image: np.ndarray) -> (Field, np.ndarray, Corners, np.ndarray)
     if field_contour is None or len(field_contour.shape) < 3:
         return None, None
 
-    (top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx) = find_field_corners(field_contour)
+    (top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx) = find_corners(field_contour)
     corners = Corners(
         field_contour[top_left_idx],
         field_contour[top_right_idx],
@@ -78,7 +78,6 @@ def cut_out_field(image: np.ndarray) -> (Field, np.ndarray, Corners, np.ndarray)
     # show_image("field", field)
 
     return Field(field, field_side, margin), field_contour, corners, perspective_transform_matrix
-
 
 
 # def find_longest_edge_len(corners: Corners) -> int:
@@ -107,7 +106,7 @@ def find_field_contour(bin_image: np.ndarray) -> Optional[np.ndarray]:
     return largest_area_contour
 
 
-def find_field_corners(field_contour: np.ndarray) -> (int, int, int, int):
+def find_corners(field_contour: np.ndarray) -> (int, int, int, int):
     coord_sums = field_contour.sum(axis=2)
     top_left_idx = np.argmin(coord_sums)
     bottom_right_idx = np.argmax(coord_sums)
@@ -160,7 +159,7 @@ def perspective_transform_contour(contour: np.ndarray, perspective_transform_mat
     return r.astype(np.int)
 
 
-def extract_subcontour(contour: np.ndarray, idx_from: int, idx_to: int):
+def extract_subcontour(contour: np.ndarray, idx_from: int, idx_to: int) -> np.ndarray:
     if idx_from < idx_to:
         r = contour[idx_from:idx_to + 1]
     else:

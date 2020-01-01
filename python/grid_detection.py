@@ -10,13 +10,13 @@ from scipy.interpolate import griddata
 from border_mapper import BorderMapper
 from digit_recognizer import recognize_digits
 from solver import solve
-from sudoku.solver import load_image, cut_out_field, find_field_corners, perspective_transform_contour, \
+from sudoku.solver import load_image, cut_out_field, find_corners, perspective_transform_contour, \
     extract_subcontour
 from utils import show_image, wait_windows, scale_image
 
 _GRID_LINES = 10
 
-_VIZUALIZE = True
+_VIZUALIZE = False
 
 
 # image = load_image("../images/big-numbers.jpg")
@@ -36,7 +36,7 @@ image = scale_image(image, 640)
 t = time.time()
 
 # Extract the field, its contour and corners.
-field, field_contour, field_corners, perspective_transform_matrix = cut_out_field(image)
+field, field_contour, _, perspective_transform_matrix = cut_out_field(image)
 
 field_gray = cv2.cvtColor(field.image, cv2.COLOR_BGR2GRAY)
 if _VIZUALIZE:
@@ -60,8 +60,6 @@ bin_field = cv2.adaptiveThreshold(
     C=11)
 if _VIZUALIZE:
     show_image("bin_field", bin_field)
-
-# field_viz = cv2.cvtColor(field_gray, cv2.COLOR_GRAY2BGR)
 
 # Find and remove numbers. Look for them on the binary image, erase from the grayscale image.
 cell_side = field.side // 9
@@ -160,7 +158,7 @@ def detect_line(image, start_x, start_y, win_h, win_w, right_limit) -> Optional[
         return None
 
 
-def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int, int]]]:
+def detect_lines(work_image, border_mapper, left_limit, right_limit) -> List[List[Tuple[int, int]]]:
     work_image_blur = cv2.GaussianBlur(work_image, (1, 25), 0)
 
     offset = cell_side // 6
@@ -169,7 +167,7 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
     win_w = cell_side // 4
 
     detected_windows = []
-    for y in range(field.margin, field.margin + field.side + 1, step):
+    for y in range(left_limit, right_limit + 1, step):
         x = border_mapper.map_x(y) + offset
         w = work_image_blur[y - 3:y + 3, x:x + win_w]
 
@@ -230,7 +228,7 @@ def detect_lines(work_image, border_mapper, right_limit) -> List[List[Tuple[int,
 
 # Recalculate the contour and the corners on the perspective transformed image.
 transformed_field_contour = perspective_transform_contour(field_contour, perspective_transform_matrix)
-top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx = find_field_corners(transformed_field_contour)
+top_left_idx, top_right_idx, bottom_right_idx, bottom_left_idx = find_corners(transformed_field_contour)
 
 # In the contour, points go counterclockwise.
 # Top border: top right -> top left
@@ -253,6 +251,7 @@ top_border_mapper = BorderMapper(top_border)
 vertical_lines = detect_lines(
     cv2.rotate(grad_x, cv2.ROTATE_90_COUNTERCLOCKWISE),
     top_border_mapper,
+    field.margin,
     field.margin + field.side
 )
 assert len(vertical_lines) == _GRID_LINES
@@ -276,7 +275,7 @@ if _VIZUALIZE:
     cv2.rotate(field_viz, cv2.ROTATE_90_CLOCKWISE, dst=field_viz)
 
 left_border_mapper = BorderMapper(left_border)
-horizontal_lines = detect_lines(grad_y, left_border_mapper, field.margin + field.side)
+horizontal_lines = detect_lines(grad_y, left_border_mapper, field.margin, field.margin + field.side)
 assert len(horizontal_lines) == _GRID_LINES
 
 horizontal_lines_masks = np.zeros(shape=(_GRID_LINES, field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
