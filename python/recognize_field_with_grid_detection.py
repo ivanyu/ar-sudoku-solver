@@ -8,7 +8,7 @@ import numpy as np
 from scipy.interpolate import griddata
 
 from border_mapper import BorderMapper
-from digit_recognizer import recognize_digits
+from digit_recognizer_2 import create_recognizer
 from solver import solve
 from sudoku.solver import load_image, cut_out_field, find_corners, perspective_transform_contour, \
     extract_subcontour
@@ -16,7 +16,7 @@ from utils import show_image, wait_windows, scale_image
 
 _GRID_LINES = 10
 
-_VIZUALIZE = False
+_VIZUALIZE = True
 
 
 # image = load_image("../images/big-numbers.jpg")
@@ -27,6 +27,7 @@ _VIZUALIZE = False
 # image = load_image("../images/sudoku-2.jpg")
 # image = load_image("../images/sudoku-2-rotated.jpg")
 image = load_image("../images/warped.jpg")
+# image = load_image("tmp/003.jpg")
 # if _VIZUALIZE:
 #     show_image("orig", image)
 
@@ -158,7 +159,10 @@ def detect_line(image, start_x, start_y, win_h, win_w, right_limit) -> Optional[
         return None
 
 
-def detect_lines(work_image, border_mapper, left_limit, right_limit) -> List[List[Tuple[int, int]]]:
+def detect_lines(work_image: np.ndarray,
+                 border_mapper: BorderMapper,
+                 left_limit: int,
+                 right_limit: int) -> List[List[Tuple[int, int]]]:
     work_image_blur = cv2.GaussianBlur(work_image, (1, 25), 0)
 
     offset = cell_side // 6
@@ -353,7 +357,9 @@ for i_row in range(_GRID_LINES - 1):
             digits_for_recog_coords.append((i_row, i_col))
 
 digits_for_recog = np.vstack(digits_for_recog)
-labels = recognize_digits(digits_for_recog)
+
+recognizer = create_recognizer()
+labels, _ = recognizer(digits_for_recog)
 unsolved_field = np.zeros(shape=(9, 9), dtype=np.uint8)
 for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
     unsolved_field[i_row, i_col] = labels[i]
@@ -395,15 +401,88 @@ for i_row in range(9):
 # map_y = np.append([], [ar[:, 0] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
 # map_x_32 = map_x.astype('float32')
 # map_y_32 = map_y.astype('float32')
-# wrapped_viz = cv2.remap(unwrapped_viz, map_x_32, map_y_32, cv2.INTER_CUBIC)
 
+if _VIZUALIZE:
+    unwrapped_viz = cv2.remap(field.image, map_x_32, map_y_32, cv2.INTER_CUBIC)
+
+unwrapped_bin = cv2.remap(bin_field, map_x_32, map_y_32, cv2.INTER_CUBIC)
+
+digits_for_recog = []
+digits_for_recog_coords = []
+for i_row in range(_GRID_LINES - 1):
+    for i_col in range(_GRID_LINES - 1):
+        recognize_side = 28
+        assert cell_side >= recognize_side
+        margin_1 = (cell_side - recognize_side) // 2
+        margin_2 = (cell_side - recognize_side) - margin_1
+        digit_img = unwrapped_bin[
+                    i_row * cell_side + margin_1:(i_row + 1) * cell_side - margin_2,
+                    i_col * cell_side + margin_1:(i_col + 1) * cell_side - margin_2
+                    ]
+        digit_img[0, :] = 0
+        digit_img[:, 0] = 0
+        digit_img[recognize_side - 1, :] = 0
+        digit_img[:, recognize_side - 1] = 0
+        avg_intensity = np.sum(digit_img) / recognize_side / recognize_side
+        if avg_intensity > 10:
+            digits_for_recog.append(digit_img[np.newaxis, :, :])
+            digits_for_recog_coords.append((i_row, i_col))
+
+digits_for_recog = np.vstack(digits_for_recog)
+
+recognizer = create_recognizer()
+labels, _ = recognizer(digits_for_recog)
+unsolved_field = np.zeros(shape=(9, 9), dtype=np.uint8)
+for i, (i_row, i_col) in enumerate(digits_for_recog_coords):
+    unsolved_field[i_row, i_col] = labels[i]
+    if _VIZUALIZE:
+        label = str(labels[i])
+        cv2.putText(unwrapped_viz, label,
+                    org=(i_col * cell_side, (i_row + 1) * cell_side),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    color=(0, 255, 0),
+                    lineType=2)
+
+solved_field = solve(unsolved_field)
+assert solved_field is not None
+
+for i_row in range(9):
+    for i_col in range(9):
+        if unsolved_field[i_row, i_col] == 0:
+            cell_side = field.side // 9
+            text = str(solved_field[i_row, i_col])
+            font_scale = 0.8
+            (text_w, text_h), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale,
+                                                         thickness=1)
+            if _VIZUALIZE:
+                margin_x = (cell_side - text_w) // 2
+                margin_y = (cell_side - text_h) // 2
+                cv2.putText(unwrapped_viz, text,
+                            org=(
+                            i_col * cell_side + margin_x, (i_row + 1) * cell_side - margin_y),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=font_scale,
+                            thickness=1,
+                            color=(0, 255, 0, 255),
+                            lineType=cv2.LINE_AA)
+
+grid_x, grid_y = np.mgrid[0:field.side + field.margin * 2, 0:field.side + field.margin * 2]
+grid_z = griddata(np.array(src_points), np.array(dst_points), (grid_x, grid_y), method='cubic')
+map_x = np.append([], [ar[:, 1] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
+map_y = np.append([], [ar[:, 0] for ar in grid_z]).reshape(field.side + field.margin * 2, field.side + field.margin * 2)
+map_x_32 = map_x.astype('float32')
+map_y_32 = map_y.astype('float32')
+
+if _VIZUALIZE:
+    wrapped_viz = cv2.remap(unwrapped_viz, map_x_32, map_y_32, cv2.INTER_CUBIC)
 
 print((time.time() - t) * 1000)
 
 if _VIZUALIZE:
     show_image("unwrapped", unwrapped_viz)
-    # show_image("wrapped back", wrapped_viz)
-    show_image("field_viz", field_viz, 700)
+    show_image("wrapped back", wrapped_viz)
+    # show_image("field_viz", field_viz, 700)
 
 if _VIZUALIZE:
     wait_windows()
