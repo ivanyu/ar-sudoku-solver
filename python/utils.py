@@ -7,7 +7,7 @@ import numpy as np
 
 def scale_image(img, target_height):
     resize_coeff = target_height / img.shape[0]
-    return cv2.resize(img, (int(img.shape[1] * resize_coeff), int(img.shape[0] * resize_coeff)))
+    return cv2.resize(img, (int(img.shape[1] * resize_coeff), int(img.shape[0] * resize_coeff)), interpolation=cv2.INTER_CUBIC)
 
 
 def show_image(window_name: str, image: np.ndarray, target_height: Optional[int] = None):
