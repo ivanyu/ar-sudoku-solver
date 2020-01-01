@@ -6,9 +6,10 @@ import cv2
 
 class VideoOut:
     def __init__(self, filename):
-        self._filename = filename + ".avi"
+        self._filename = filename + ".mp4"
         # self._fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        self._fourcc = cv2.VideoWriter_fourcc(*"I422")
+        # self._fourcc = cv2.VideoWriter_fourcc(*"I422")
+        self._fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         self._out: Optional[cv2.VideoWriter] = None
         self.i = 0
 
@@ -20,7 +21,7 @@ class VideoOut:
 
         cv2.imwrite(f"x-{self.i:03d}.jpg", frame)
         self.i += 1
-        # self._out.write(frame)
+        self._out.write(frame)
 
     def release(self):
         self._out.release()
