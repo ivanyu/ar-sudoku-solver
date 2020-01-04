@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import math
 from typing import Optional
 
 import cv2
@@ -29,3 +30,7 @@ def get_line_coeffs(x1, y1, x2, y2):
     a = (y2 - y1) / (x2 - x1)
     b = y2 - x2 * a
     return a, b
+
+
+def segment_length(x1, y1, x2, y2):
+    return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
