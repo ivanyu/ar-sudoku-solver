@@ -77,8 +77,8 @@ np.clip(grad_y, a_min=0, a_max=grad_y.max(), out=grad_y)
 grad_y = cv2.normalize(grad_y, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
 
 if _VIZUALIZE:
-    show_image("grad_x", grad_x, 700)
-    show_image("grad_y", grad_y, 700)
+    show_image("grad_x", grad_x)
+    show_image("grad_y", grad_y)
 
 
 # Find the borders.
@@ -181,6 +181,9 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
                 # print("Stopping at", y_off)
                 break
     else:
+        show_image("viz", viz, 700)
+        wait_windows()
+        exit()
         assert False
 
     # todo optimization: don't refine if more than another threshold
@@ -208,7 +211,7 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
     return line
 
 
-def continue_line(work_image: np.ndarray, line: List[np.ndarray], vizualization: dict,
+def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualization: dict,
                   debug: bool) -> List[Tuple[int, int]]:
     win_h_half = 1
 
@@ -240,11 +243,11 @@ def continue_line(work_image: np.ndarray, line: List[np.ndarray], vizualization:
             # cv2.circle(viz, (x_int, y_int), 2, (0, 0, 255), -1)
             # print(work_image[y_int, x_int])
 
-            if run % 2 == 0:
-                color = vizualization["color_1"]
-            else:
-                color = vizualization["color_2"]
-
+            # if _VIZUALIZE:
+            #     if run % 2 == 0:
+            #         color = vizualization["color_1"]
+            #     else:
+            #         color = vizualization["color_2"]
             # if _VIZUALIZE:
             #     cv2.rectangle(viz, (x_int, y_int - win_h_half), (x_int, y_int + win_h_half), color, 1)
             window = work_image[y_int - win_h_half:y_int + win_h_half + 1, x_int:x_int + 1]
@@ -299,15 +302,25 @@ def find_lines(work_image: np.ndarray,
     left_border_mapper = BorderMapper(left_border)
 
     for i in range(1, 9):
+        current_line = find_next_line(work_image_thresh, current_line, left_border_mapper, horizonal_look_ahead,
+                                      vizualization, debug=False)
         # Due to noise and the border thickness, the first point is likely to be an outlier,
         # skipping it.
         current_line = current_line[1:]
-        current_line = find_next_line(work_image_thresh, current_line, left_border_mapper, horizonal_look_ahead,
-                                      vizualization, debug=False)
         # if vizualization["enabled"]:
         #     for x, y in current_line[1:]:
         #         cv2.circle(vizualization["image"], (x, y), 1, vizualization["color_0"], -1)
-        full_line = continue_line(work_image_thresh, current_line, vizualization, debug=i == 7)
+        full_line = continue_line(work_image_thresh, current_line, vizualization, debug=False)
+
+        # Extrapolate the beginning.
+        points_to_fit = 5
+        xs = [p[0] for p in full_line[:points_to_fit + 1]]
+        ys = [p[1] for p in full_line[:points_to_fit + 1]]
+        a, b = np.polyfit(xs, ys, 1)
+        x = 0
+        y = int(round(a * x + b))
+        full_line.insert(0, (x, y))
+
         lines[i] = full_line
 
     return lines
