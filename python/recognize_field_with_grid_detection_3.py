@@ -20,13 +20,13 @@ _VIZUALIZE = True
 
 
 # image = load_image("../images/big-numbers.jpg")
-# image = load_image("../images/slightly_blurry.jpg")
+image = load_image("../images/slightly_blurry.jpg")   # !!!
 # image = load_image("../images/sudoku.jpg")
-# image = load_image("../images/sudoku-rotated.jpg")  ## 1111
+# image = load_image("../images/sudoku-rotated.jpg")
 # image = load_image("../images/sudoku-1.jpg")
-# image = load_image("../images/sudoku-2.jpg")  ## 1111
+# image = load_image("../images/sudoku-2.jpg")
 # image = load_image("../images/sudoku-2-rotated.jpg")
-image = load_image("../images/warped.jpg")
+# image = load_image("../images/warped.jpg")
 # image = load_image("tmp/001.jpg")
 # image = load_image("tmp/003.jpg")
 # image = load_image("tmp/005.jpg")
@@ -213,15 +213,10 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
 
 def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualization: dict,
                   debug: bool) -> List[Tuple[int, int]]:
-    win_h_half = 1
-
-    ys_centered = np.arange(win_h_half * 2 + 1) - win_h_half
-    ys_centered = ys_centered[:, np.newaxis]
-
     line = list(line)
     last_len = len(line)
     for run in range(1000):  # effectively infinite
-        tail = np.array(line[-5:])
+        tail = np.array(line[-7:])
         a, b = np.polyfit(tail[:, 0], tail[:, 1], 1)
         x, y = tail[-1]
         dx = 5
@@ -240,25 +235,20 @@ def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualiza
             y += dy
             x_int = int(round(x))
             y_int = int(round(y))
-            # cv2.circle(viz, (x_int, y_int), 2, (0, 0, 255), -1)
-            # print(work_image[y_int, x_int])
 
             # if _VIZUALIZE:
             #     if run % 2 == 0:
             #         color = vizualization["color_1"]
             #     else:
             #         color = vizualization["color_2"]
-            # if _VIZUALIZE:
-            #     cv2.rectangle(viz, (x_int, y_int - win_h_half), (x_int, y_int + win_h_half), color, 1)
-            window = work_image[y_int - win_h_half:y_int + win_h_half + 1, x_int:x_int + 1]
-            s = np.sum(window)
-            if s > 0:
-                avg = np.sum(ys_centered * window) / s
-                avg = int(round(avg))
-                # if vizualization["enabled"]:
-                #     cv2.circle(vizualization["image"], (x_int, y_int + avg), 1, color, -1)
-                line.append((x_int, y_int + avg))
-                if avg != 0:
+            # if debug and _VIZUALIZE:
+            #     cv2.circle(viz, (x_int, y_int), 1, (255, 0, 255), -1)
+
+            y_refined = refine_point(work_image, x_int, y_int, 1)
+            if y_refined is not None:
+                line.append((x_int, y_refined))
+                # We started to diverge, let's reset.
+                if y_refined != y_int:
                     break
             else:
                 skipped_steps += 1
@@ -267,7 +257,8 @@ def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualiza
                 else:
                     continue
 
-        if len(line) == last_len:
+        no_new_points_added = len(line) == last_len
+        if no_new_points_added:
             break
         last_len = len(line)
     return line
@@ -304,22 +295,30 @@ def find_lines(work_image: np.ndarray,
     for i in range(1, 9):
         current_line = find_next_line(work_image_thresh, current_line, left_border_mapper, horizonal_look_ahead,
                                       vizualization, debug=False)
-        # Due to noise and the border thickness, the first point is likely to be an outlier,
-        # skipping it.
-        current_line = current_line[1:]
         # if vizualization["enabled"]:
         #     for x, y in current_line[1:]:
         #         cv2.circle(vizualization["image"], (x, y), 1, vizualization["color_0"], -1)
-        full_line = continue_line(work_image_thresh, current_line, vizualization, debug=False)
 
-        # Extrapolate the beginning.
+        # Due to noise and the border thickness, the first point is likely to be an outlier,
+        # replacing it with an exptrapolation.
         points_to_fit = 5
-        xs = [p[0] for p in full_line[:points_to_fit + 1]]
-        ys = [p[1] for p in full_line[:points_to_fit + 1]]
+        xs = [p[0] for p in current_line[1:points_to_fit + 2]]
+        ys = [p[1] for p in current_line[1:points_to_fit + 2]]
         a, b = np.polyfit(xs, ys, 1)
         x = 0
         y = int(round(a * x + b))
-        full_line.insert(0, (x, y))
+        current_line[0] = (x, y)
+
+        full_line = continue_line(work_image_thresh, current_line, vizualization, debug=i == 4)
+
+        # Due to noise and the border thickness, the last point is likely to be an outlier,
+        # replacing it with an exptrapolation.
+        xs = [p[0] for p in full_line[-points_to_fit - 1:-1]]
+        ys = [p[1] for p in full_line[-points_to_fit - 1:-1]]
+        a, b = np.polyfit(xs, ys, 1)
+        x = field.image.shape[1]
+        y = int(round(a * x + b))
+        full_line[-1] = (x, y)
 
         lines[i] = full_line
 
@@ -329,8 +328,8 @@ def find_lines(work_image: np.ndarray,
 viz = None
 if _VIZUALIZE:
     _, grad_y_t = cv2.threshold(grad_y, 5, 255, cv2.THRESH_BINARY)
-    # viz = cv2.cvtColor(grad_y_t, cv2.COLOR_GRAY2BGR)
-    viz = field.image
+    viz = cv2.cvtColor(grad_y_t, cv2.COLOR_GRAY2BGR)
+    # viz = field.image
     # viz = cv2.cvtColor(grad_y, cv2.COLOR_GRAY2BGR)
     cv2.rotate(viz, cv2.ROTATE_90_COUNTERCLOCKWISE, dst=viz)
 
@@ -368,10 +367,12 @@ vertical_lines = find_lines(
 )
 
 for line in vertical_lines:
-    for i in range(len(line) - 1):
-        x1, y1 = line[i]
-        x2, y2 = line[i + 1]
-        cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
+    for xy in line:
+        cv2.circle(viz, xy, 1, (0, 255, 0), -1)
+    # for i in range(len(line) - 1):
+    #     x1, y1 = line[i]
+    #     x2, y2 = line[i + 1]
+    #     cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
 if _VIZUALIZE:
     cv2.rotate(viz, cv2.ROTATE_90_CLOCKWISE, dst=viz)
@@ -391,10 +392,12 @@ horizontal_lines = find_lines(
 )
 
 for line in horizontal_lines:
-    for i in range(len(line) - 1):
-        x1, y1 = line[i]
-        x2, y2 = line[i + 1]
-        cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
+    for xy in line:
+        cv2.circle(viz, xy, 1, (0, 255, 0), -1)
+    # for i in range(len(line) - 1):
+    #     x1, y1 = line[i]
+    #     x2, y2 = line[i + 1]
+    #     cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
 # Extract borders
 # Refine borders
