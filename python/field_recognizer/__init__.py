@@ -49,6 +49,9 @@ def recognize_field(image: np.ndarray) -> np.ndarray:
     if _VIZUALIZE:
         show_image("unwrapped_field_img", unwrapped_field_img)
 
+    if _VIZUALIZE:
+        wait_windows()
+
     return _recognize_field(unwrapped_field_img, field_gray.ideal_cell_side())
 
 
@@ -478,10 +481,10 @@ def _recognize_field(unwrapped_field_img: np.ndarray, cell_side: int) -> np.ndar
                         i_row * cell_side + margin_1:(i_row + 1) * cell_side - margin_2,
                         i_col * cell_side + margin_1:(i_col + 1) * cell_side - margin_2
                         ]
-            # digit_img[0, :] = 0
-            # digit_img[:, 0] = 0
-            # digit_img[recognize_side - 1, :] = 0
-            # digit_img[:, recognize_side - 1] = 0
+            digit_img[0, :] = 0
+            digit_img[:, 0] = 0
+            digit_img[recognize_side - 1, :] = 0
+            digit_img[:, recognize_side - 1] = 0
 
             # line_width = 3
             # digit_img = unwrapped_field_img[
