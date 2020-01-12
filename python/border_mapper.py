@@ -1,5 +1,5 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import bisect
 from utils import get_line_coeffs
 
 
@@ -8,7 +8,10 @@ class BorderMapper:
         """
         Assumes the border points are ordered by the 'from' coordinate.
         """
-        self.border_points = border_points
+        self._points = [
+            list(border_points[:, 0]),
+            list(border_points[:, 1]),
+        ]
 
     def map_x(self, y: int) -> int:
         return self._map(y, is_map_x=True)
@@ -18,34 +21,29 @@ class BorderMapper:
 
     def _map(self, input, is_map_x: bool) -> int:
         if is_map_x:
-            input_dim = 1
-            output_dim = 0
+            input_coord = self._points[1]
+            output_coord = self._points[0]
         else:
-            input_dim = 0
-            output_dim = 1
+            input_coord = self._points[0]
+            output_coord = self._points[1]
 
-        if input < self.border_points[0][input_dim]:
-            return self.border_points[0][output_dim]
-        if input > self.border_points[-1][input_dim]:
-            return self.border_points[1][output_dim]
+        if input <= input_coord[0]:
+            return output_coord[0]
+        if input >= input_coord[-1]:
+            return output_coord[-1]
 
-        less_than = None
-        greater_than = None
-        # TODO bin search
-        for p in self.border_points:
-            if p[input_dim] == input:
-                return p[output_dim]
-            if p[input_dim] < input:
-                less_than = p
-            elif p[input_dim] > input and greater_than is None:
-                greater_than = p
-                # No need to iterate further when the first point greater is found.
-                break
+        insertion_place = bisect.bisect_left(input_coord, input)
+        if input_coord[insertion_place] == input:
+            return output_coord[insertion_place]
+        less_than = insertion_place - 1
+        greater_than = insertion_place
 
-        assert less_than[input_dim] < input < greater_than[input_dim]
+        assert input_coord[less_than] < input < input_coord[greater_than]
 
-        x1, y1 = less_than
-        x2, y2 = greater_than
+        x1 = self._points[0][less_than]
+        y1 = self._points[1][less_than]
+        x2 = self._points[0][greater_than]
+        y2 = self._points[1][greater_than]
 
         if x1 == x2 and is_map_x:
             return x1
@@ -60,4 +58,3 @@ class BorderMapper:
         else:
             y = a * input + b
             return int(round(y))
-
