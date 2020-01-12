@@ -57,20 +57,6 @@ field_gray = cv2.normalize(field_gray_adj, None, 0, 255, cv2.NORM_MINMAX, cv2.CV
 if _VIZUALIZE:
     show_image("field_gray adj", field_gray)
 
-# Apply the Sobel operator of 2nd degree to both directions.
-grad_x = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=2, dy=0, ksize=7, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)
-np.clip(grad_x, a_min=0, a_max=grad_x.max(), out=grad_x)
-grad_x = cv2.normalize(grad_x, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-
-grad_y = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=0, dy=2, ksize=7, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)
-np.clip(grad_y, a_min=0, a_max=grad_y.max(), out=grad_y)
-grad_y = cv2.normalize(grad_y, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-
-if _VIZUALIZE:
-    show_image("grad_x", grad_x)
-    show_image("grad_y", grad_y)
-
-
 # Find the borders.
 
 # Recalculate the contour and the corners on the perspective transformed image.
@@ -127,16 +113,13 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
         y2 -= y_min
         return x1, y1, x2, y2
 
-
     x1_rel, y1_rel, x2_rel, y2_rel = _relative_coords(x1, y1, x2, y2)
 
-
-    def create_mask(x1_rel: int, y1_rel: int, x2_rel: int, y2_rel: int) -> Tuple[np.ndarray, int, int]:
+    def create_mask(x1_rel: int, y1_rel: int, x2_rel: int, y2_rel: int) -> np.ndarray:
         assert x1_rel < x2_rel
         mask = np.zeros((abs(y1_rel - y2_rel) + 1, x2_rel - x1_rel + 1), dtype=np.uint8)
         cv2.line(mask, (x1_rel, y1_rel), (x2_rel, y2_rel), 255, 1)
         return mask
-
 
     mask = create_mask(x1_rel, y1_rel, x2_rel, y2_rel)
     max_intersect = np.count_nonzero(mask)
@@ -292,22 +275,16 @@ def find_lines(work_image: np.ndarray,
 
         # Due to noise and the border thickness, the first point is likely to be an outlier,
         # replacing it with an exptrapolation.
-        xs = [p[0] for p in current_line[1:points_to_fit_on_extrapolation + 2]]
-        ys = [p[1] for p in current_line[1:points_to_fit_on_extrapolation + 2]]
-        a, b = np.polyfit(xs, ys, 1)
         x = 0
-        y = int(round(a * x + b))
+        y = extrapolate_y(current_line[1:points_to_fit_on_extrapolation + 2], x)
         current_line[0] = (x, y)
 
         full_line = continue_line(work_image_thresh, current_line, vizualization, debug=i == 4)
 
         # Due to noise and the border thickness, the last point is likely to be an outlier,
         # replacing it with an exptrapolation.
-        xs = [p[0] for p in full_line[-points_to_fit_on_extrapolation - 1:-1]]
-        ys = [p[1] for p in full_line[-points_to_fit_on_extrapolation - 1:-1]]
-        a, b = np.polyfit(xs, ys, 1)
         x = field.image.shape[1]
-        y = int(round(a * x + b))
+        y = extrapolate_y(full_line[-points_to_fit_on_extrapolation - 1:-1], x)
         full_line[-1] = (x, y)
 
         lines[i] = full_line
@@ -358,6 +335,12 @@ def rotate_border(border: np.ndarray, change_order: bool) -> np.ndarray:
     return border
 
 
+grad_x = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=2, dy=0, ksize=7, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)
+np.clip(grad_x, a_min=0, a_max=grad_x.max(), out=grad_x)
+grad_x = cv2.normalize(grad_x, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
+if _VIZUALIZE:
+    show_image("grad_x", grad_x)
+
 grad_x_rot = cv2.rotate(grad_x, cv2.ROTATE_90_COUNTERCLOCKWISE)
 right_border_rot = rotate_border(right_border, change_order=False)
 left_border_rot = rotate_border(left_border, change_order=False)
@@ -392,6 +375,13 @@ for i, line in enumerate(vertical_lines):
 
 if _VIZUALIZE:
     cv2.rotate(viz, cv2.ROTATE_90_CLOCKWISE, dst=viz)
+
+
+grad_y = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=0, dy=2, ksize=7, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)
+np.clip(grad_y, a_min=0, a_max=grad_y.max(), out=grad_y)
+grad_y = cv2.normalize(grad_y, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
+if _VIZUALIZE:
+    show_image("grad_y", grad_y)
 
 horizontal_lines = find_lines(
     grad_y,
