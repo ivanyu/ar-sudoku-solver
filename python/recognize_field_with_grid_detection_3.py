@@ -20,13 +20,13 @@ _VIZUALIZE = True
 
 
 # image = load_image("../images/big-numbers.jpg")
-image = load_image("../images/slightly_blurry.jpg")   # !!!
+# image = load_image("../images/slightly_blurry.jpg")
 # image = load_image("../images/sudoku.jpg")
 # image = load_image("../images/sudoku-rotated.jpg")
 # image = load_image("../images/sudoku-1.jpg")
 # image = load_image("../images/sudoku-2.jpg")
 # image = load_image("../images/sudoku-2-rotated.jpg")
-# image = load_image("../images/warped.jpg")
+image = load_image("../images/warped.jpg")
 # image = load_image("tmp/001.jpg")
 # image = load_image("tmp/003.jpg")
 # image = load_image("tmp/005.jpg")
@@ -56,16 +56,6 @@ field_gray_adj = np.divide(field_gray, field_gray_closed)
 field_gray = cv2.normalize(field_gray_adj, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
 if _VIZUALIZE:
     show_image("field_gray adj", field_gray)
-
-# # Binarize the field.
-# bin_field = cv2.adaptiveThreshold(
-#     field_gray, maxValue=255,
-#     adaptiveMethod=cv2.ADAPTIVE_THRESH_MEAN_C,
-#     thresholdType=cv2.THRESH_BINARY_INV,
-#     blockSize=17,
-#     C=11)
-# if _VIZUALIZE:
-#     show_image("bin_field", bin_field)
 
 # Apply the Sobel operator of 2nd degree to both directions.
 grad_x = cv2.Sobel(field_gray, ddepth=cv2.CV_64F, dx=2, dy=0, ksize=7, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)
@@ -188,9 +178,6 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
 
     # todo optimization: don't refine if more than another threshold
 
-    # print(seen_max, seen_max_x_off, seen_max_y_off)
-    # cv2.line(viz, (x1_rel + seen_max_x_off, y1_rel + seen_max_y_off), (x2_rel + seen_max_x_off, y2_rel + seen_max_y_off), (0, 255, 0), 1)
-
     x = x1_rel + seen_max_x_off
     y = y1_rel + seen_max_y_off
 
@@ -211,12 +198,11 @@ def find_next_line(work_image: np.ndarray, current_line: np.ndarray, left_border
     return line
 
 
-def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualization: dict,
-                  debug: bool) -> List[Tuple[int, int]]:
+def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]],
+                  vizualization: dict, debug: bool) -> List[Tuple[int, int]]:
     line = list(line)
-    last_len = len(line)
     for run in range(1000):  # effectively infinite
-        tail = np.array(line[-7:])
+        tail = np.array(line[-10:])
         a, b = np.polyfit(tail[:, 0], tail[:, 1], 1)
         x, y = tail[-1]
         dx = 5
@@ -225,48 +211,56 @@ def continue_line(work_image: np.ndarray, line: List[Tuple[int, int]], vizualiza
         if x >= field.margin + field.side:
             break
 
-        skipped_steps = 0
-        for _ in range(40):
-            x += dx
-
-            if x >= field.margin + field.side:
-                break
-
-            y += dy
-            x_int = int(round(x))
-            y_int = int(round(y))
-
-            # if _VIZUALIZE:
-            #     if run % 2 == 0:
-            #         color = vizualization["color_1"]
-            #     else:
-            #         color = vizualization["color_2"]
-            # if debug and _VIZUALIZE:
-            #     cv2.circle(viz, (x_int, y_int), 1, (255, 0, 255), -1)
-
-            y_refined = refine_point(work_image, x_int, y_int, 1)
-            if y_refined is not None:
-                line.append((x_int, y_refined))
-                # We started to diverge, let's reset.
-                if y_refined != y_int:
-                    break
-            else:
-                skipped_steps += 1
-                if skipped_steps >= 2:
-                    break
-                else:
-                    continue
-
-        no_new_points_added = len(line) == last_len
-        if no_new_points_added:
+        new_points = continue_line_run(work_image, x, y, dx, dy, vizualization, debug)
+        if len(new_points) == 0:
             break
-        last_len = len(line)
+        line += new_points
     return line
+
+
+def continue_line_run(work_image: np.ndarray, x: int, y: int, dx: float, dy: float,
+                      vizualization: dict, debug: bool) -> List[Tuple[int, int]]:
+    new_points = []
+    skipped_steps = 0
+    for _ in range(40):
+        x += dx
+
+        if x >= field.margin + field.side:
+            break
+
+        y += dy
+        x_int = int(round(x))
+        y_int = int(round(y))
+
+        # if _VIZUALIZE:
+        #     if run % 2 == 0:
+        #         color = vizualization["color_1"]
+        #     else:
+        #         color = vizualization["color_2"]
+        # if debug and _VIZUALIZE:
+        #     cv2.line(viz, (x_int, y_int - 1), (x_int, y_int + 1), (255, 0, 255), 1)
+        #     # cv2.circle(viz, (x_int, y_int), 1, (255, 0, 255), -1)
+
+        y_refined = refine_point(work_image, x_int, y_int, 1)
+        if y_refined is not None:
+            new_points.append((x_int, y_refined))
+            # We started to diverge, let's reset.
+            if y_refined != y_int:
+                break
+        else:
+            skipped_steps += 1
+            if skipped_steps >= 2:
+                break
+            else:
+                continue
+    return new_points
 
 
 def find_lines(work_image: np.ndarray,
                top_border: np.ndarray, bottom_border: np.ndarray, left_border: np.ndarray,
                vizualization: dict) -> List[List[Tuple[int, int]]]:
+    points_to_fit_on_extrapolation = 5
+
     _, work_image_thresh = cv2.threshold(work_image, 5, 255, cv2.THRESH_BINARY)
 
     lines = [[] for _ in range(10)]
@@ -276,14 +270,11 @@ def find_lines(work_image: np.ndarray,
         y = refine_point(work_image, x, y, 2)
         if y is not None:
             lines[0].append((x, y))
-            # if vizualization["enabled"]:
-            #     cv2.circle(vizualization["image"], (x, y), 1, vizualization["color_0"], -1)
     for x, y in bottom_border:
         y = refine_point(work_image, x, y, 3)
+        assert y is not None
         if y is not None:
             lines[9].append((x, y))
-            # if vizualization["enabled"]:
-            #     cv2.circle(vizualization["image"], (x, y), 1, vizualization["color_0"], -1)
 
     horizonal_look_ahead = cell_side * 2
 
@@ -301,9 +292,8 @@ def find_lines(work_image: np.ndarray,
 
         # Due to noise and the border thickness, the first point is likely to be an outlier,
         # replacing it with an exptrapolation.
-        points_to_fit = 5
-        xs = [p[0] for p in current_line[1:points_to_fit + 2]]
-        ys = [p[1] for p in current_line[1:points_to_fit + 2]]
+        xs = [p[0] for p in current_line[1:points_to_fit_on_extrapolation + 2]]
+        ys = [p[1] for p in current_line[1:points_to_fit_on_extrapolation + 2]]
         a, b = np.polyfit(xs, ys, 1)
         x = 0
         y = int(round(a * x + b))
@@ -313,8 +303,8 @@ def find_lines(work_image: np.ndarray,
 
         # Due to noise and the border thickness, the last point is likely to be an outlier,
         # replacing it with an exptrapolation.
-        xs = [p[0] for p in full_line[-points_to_fit - 1:-1]]
-        ys = [p[1] for p in full_line[-points_to_fit - 1:-1]]
+        xs = [p[0] for p in full_line[-points_to_fit_on_extrapolation - 1:-1]]
+        ys = [p[1] for p in full_line[-points_to_fit_on_extrapolation - 1:-1]]
         a, b = np.polyfit(xs, ys, 1)
         x = field.image.shape[1]
         y = int(round(a * x + b))
@@ -322,14 +312,34 @@ def find_lines(work_image: np.ndarray,
 
         lines[i] = full_line
 
+    # Extrapolate borders.
+    for line_i in [0, -1]:
+        line = lines[line_i]
+
+        x = 0
+        y = extrapolate_y(line[:points_to_fit_on_extrapolation + 1], x)
+        line.insert(0, (x, y))
+
+        x = work_image.shape[1]
+        y = extrapolate_y(line[-points_to_fit_on_extrapolation:], x)
+        line.append((x, y))
+
     return lines
+
+
+def extrapolate_y(points: List[Tuple[int, int]], x: int) -> int:
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    a, b = np.polyfit(xs, ys, 1)
+    y = int(round(a * x + b))
+    return y
 
 
 viz = None
 if _VIZUALIZE:
-    _, grad_y_t = cv2.threshold(grad_y, 5, 255, cv2.THRESH_BINARY)
-    viz = cv2.cvtColor(grad_y_t, cv2.COLOR_GRAY2BGR)
-    # viz = field.image
+    # _, grad_y_t = cv2.threshold(grad_y, 5, 255, cv2.THRESH_BINARY)
+    # viz = cv2.cvtColor(grad_y_t, cv2.COLOR_GRAY2BGR)
+    viz = field.image
     # viz = cv2.cvtColor(grad_y, cv2.COLOR_GRAY2BGR)
     cv2.rotate(viz, cv2.ROTATE_90_COUNTERCLOCKWISE, dst=viz)
 
@@ -366,13 +376,19 @@ vertical_lines = find_lines(
     },
 )
 
-for line in vertical_lines:
-    for xy in line:
-        cv2.circle(viz, xy, 1, (0, 255, 0), -1)
-    # for i in range(len(line) - 1):
-    #     x1, y1 = line[i]
-    #     x2, y2 = line[i + 1]
-    #     cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
+vertical_line_masks = []
+for i, line in enumerate(vertical_lines):
+    poly = [np.array(line, np.int32)]
+    mask = np.zeros(shape=(field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
+    cv2.polylines(mask, poly, isClosed=False, color=255, thickness=1)
+    cv2.rotate(mask, cv2.ROTATE_90_CLOCKWISE, dst=mask)
+    # Prepending is a part of rotation.
+    vertical_line_masks.insert(0, mask)
+
+    # if _VIZUALIZE:
+    #     # for xy in line:
+    #     #     cv2.circle(viz, xy, 1, (0, 0, 255), -1)
+    #     cv2.polylines(viz, poly, isClosed=False, color=(0, 255, 0), thickness=1)
 
 if _VIZUALIZE:
     cv2.rotate(viz, cv2.ROTATE_90_CLOCKWISE, dst=viz)
@@ -391,21 +407,33 @@ horizontal_lines = find_lines(
     },
 )
 
-for line in horizontal_lines:
-    for xy in line:
-        cv2.circle(viz, xy, 1, (0, 255, 0), -1)
-    # for i in range(len(line) - 1):
-    #     x1, y1 = line[i]
-    #     x2, y2 = line[i + 1]
-    #     cv2.line(viz, (x1, y1), (x2, y2), (0, 255, 0), 1)
+horizontal_line_masks = []
+for i, line in enumerate(horizontal_lines):
+    poly = [np.array(line, np.int32)]
+    mask = np.zeros(shape=(field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
+    cv2.polylines(mask, poly, isClosed=False, color=255, thickness=1)
+    horizontal_line_masks.append(mask)
 
-# Extract borders
-# Refine borders
-# For each orientation:
-#  - take top border start
-#  - find line beginnings
-#  - continue lines
-#  - extrapolate skipping the first and the last lines
+    # if _VIZUALIZE:
+    #     # for xy in line:
+    #     #     cv2.circle(viz, xy, 1, (0, 0, 255), -1)
+    #     cv2.polylines(viz, poly, isClosed=False, color=(0, 255, 0), thickness=1)
+
+# TODO ? intersect one horizontal with all vertical
+intersection = np.zeros(shape=(field.image.shape[0], field.image.shape[1]), dtype=np.uint8)
+
+for i_row in range(_GRID_LINES):
+    for i_col in range(_GRID_LINES):
+        np.bitwise_and(horizontal_line_masks[i_row], vertical_line_masks[i_col], out=intersection)
+        intersection_points = np.argwhere(intersection == 255)
+
+        # There should not be more than several intersection points:
+        # one is the default, 2 might be due to the overlapping of steps in lines.
+        assert 1 <= intersection_points.shape[0] <= 2
+
+        x, y = np.flip(intersection_points[0])  # put x before y
+        cv2.circle(viz, (x, y), 1, (0, 0, 255), -1)
+
 
 print((time.time() - t) * 1000)
 
