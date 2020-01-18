@@ -7,12 +7,12 @@ import cv2
 import numpy as np
 from scipy.interpolate import griddata
 
-from border_mapper import BorderMapper
+from line_mapper import LineMapper
 from digit_recognizer_2 import create_recognizer
 from solver import solve
 from sudoku.solver import load_image, cut_out_field, find_corners, perspective_transform_contour, \
     extract_subcontour
-from utils import show_image, wait_windows, scale_image
+from utils import show_image, wait_windows, scale_image_target_height
 
 _GRID_LINES = 10
 
@@ -31,7 +31,7 @@ image = load_image("../images/warped.jpg")
 # if _VIZUALIZE:
 #     show_image("orig", image)
 
-image = scale_image(image, 640)
+image = scale_image_target_height(image, 640)
 
 
 t = time.time()
@@ -160,7 +160,7 @@ def detect_line(image, start_x, start_y, win_h, win_w, right_limit) -> Optional[
 
 
 def detect_lines(work_image: np.ndarray,
-                 border_mapper: BorderMapper,
+                 border_mapper: LineMapper,
                  left_limit: int,
                  right_limit: int) -> List[List[Tuple[int, int]]]:
     work_image_blur = cv2.GaussianBlur(work_image, (1, 25), 0)
@@ -251,7 +251,7 @@ left_border = extract_subcontour(transformed_field_contour, top_left_idx, bottom
 field_viz = cv2.cvtColor(field_gray, cv2.COLOR_GRAY2BGR)
 cv2.rotate(field_viz, cv2.ROTATE_90_COUNTERCLOCKWISE, dst=field_viz)
 
-top_border_mapper = BorderMapper(top_border)
+top_border_mapper = LineMapper(top_border)
 vertical_lines = detect_lines(
     cv2.rotate(grad_x, cv2.ROTATE_90_COUNTERCLOCKWISE),
     top_border_mapper,
@@ -278,7 +278,7 @@ vertical_lines_masks = np.rot90(vertical_lines_masks, k=-1, axes=(1, 2))
 if _VIZUALIZE:
     cv2.rotate(field_viz, cv2.ROTATE_90_CLOCKWISE, dst=field_viz)
 
-left_border_mapper = BorderMapper(left_border)
+left_border_mapper = LineMapper(left_border)
 horizontal_lines = detect_lines(grad_y, left_border_mapper, field.margin, field.margin + field.side)
 assert len(horizontal_lines) == _GRID_LINES
 

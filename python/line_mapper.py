@@ -1,17 +1,29 @@
 # -*- coding: utf-8 -*-
 import bisect
+from typing import Union, Collection, Tuple
+
+import numpy as np
+
 from utils import get_line_coeffs
 
 
-class BorderMapper:
-    def __init__(self, border_points):
+class LineMapper:
+    def __init__(self, border_points: Union[np.ndarray, Collection[Tuple[int, int]]]):
         """
-        Assumes the border points are ordered by the 'from' coordinate.
+        Assumes the line points are ordered by the 'from' coordinate.
         """
-        self._points = [
-            list(border_points[:, 0]),
-            list(border_points[:, 1]),
-        ]
+        if isinstance(border_points, np.ndarray):
+            self._points = [
+                list(border_points[:, 0]),
+                list(border_points[:, 1]),
+            ]
+        else:
+            xs = []
+            ys = []
+            for x, y in border_points:
+                xs.append(x)
+                ys.append(y)
+            self._points = [xs, ys]
 
     def map_x(self, y: int) -> int:
         return self._map(y, is_map_x=True)
@@ -28,13 +40,13 @@ class BorderMapper:
             output_coord = self._points[1]
 
         if input <= input_coord[0]:
-            return output_coord[0]
+            return int(output_coord[0])
         if input >= input_coord[-1]:
-            return output_coord[-1]
+            return int(output_coord[-1])
 
         insertion_place = bisect.bisect_left(input_coord, input)
         if input_coord[insertion_place] == input:
-            return output_coord[insertion_place]
+            return int(output_coord[insertion_place])
         less_than = insertion_place - 1
         greater_than = insertion_place
 
@@ -46,9 +58,9 @@ class BorderMapper:
         y2 = self._points[1][greater_than]
 
         if x1 == x2 and is_map_x:
-            return x1
+            return int(x1)
         if y1 == y2 and not is_map_x:
-            return y1
+            return int(y1)
 
         a, b = get_line_coeffs(x1, y1, x2, y2)
 

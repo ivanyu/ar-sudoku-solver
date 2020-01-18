@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import cv2
 import numpy as np
 from scipy.interpolate import griddata
 
-from border_mapper import BorderMapper
+from line_mapper import LineMapper
 from digit_recognizer_2 import create_recognizer
+from refine_point import refine_point
 from sudoku import Field
 from sudoku.solver import cut_out_field, perspective_transform_contour, find_corners, extract_subcontour
 
+
+_GRAD_THRESHOLD = 5
 
 _GRID_LINES = 10
 
@@ -21,15 +24,20 @@ if _VIZUALIZE:
     from utils import show_image, wait_windows
 
 
+class GridDetectionException(Exception):
+    def __init__(self, *args, **kwargs):
+        super(GridDetectionException, self).__init__(*args, **kwargs)
+
+
 def recognize_field(image: np.ndarray) -> np.ndarray:
     # Extract the field, its contour and corners.
     field, field_contour, _, perspective_transform_matrix = cut_out_field(image)
+
     field_gray = Field(
-        _gray_image(field.image),
+        _gray_image(field.image, adjust_brightness=True),
         field.side,
         field.margin
     )
-
     grid_points = _find_grid_points(field_gray, field_contour, perspective_transform_matrix)
 
     field_bin_img = cv2.adaptiveThreshold(
@@ -55,18 +63,20 @@ def recognize_field(image: np.ndarray) -> np.ndarray:
     return _recognize_field(unwrapped_field_img, field_gray.ideal_cell_side())
 
 
-def _gray_image(image: np.ndarray) -> np.ndarray:
+def _gray_image(image: np.ndarray, adjust_brightness: bool) -> np.ndarray:
     field_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     if _VIZUALIZE:
         show_image("field_gray", field_gray)
-    # Adjust brightness.
-    field_gray_closed = cv2.morphologyEx(
-        field_gray, cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-    field_gray_adj = np.divide(field_gray, field_gray_closed)
-    field_gray = cv2.normalize(field_gray_adj, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-    if _VIZUALIZE:
-        show_image("field_gray adj", field_gray)
+
+    if adjust_brightness:
+        field_gray_closed = cv2.morphologyEx(
+            field_gray, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        field_gray_adj = np.divide(field_gray, field_gray_closed)
+        field_gray = cv2.normalize(field_gray_adj, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
+        if _VIZUALIZE:
+            show_image("field_gray adj", field_gray)
+
     return field_gray
 
 
@@ -83,12 +93,18 @@ def _find_grid_points(field_gray: Field, field_contour: np.ndarray, perspective_
 
     for i_row in range(_GRID_LINES):
         for i_col in range(_GRID_LINES):
-            np.bitwise_and(horizontal_line_masks[i_row], vertical_line_masks[i_col], out=intersection)
+            horizontal_mask = horizontal_line_masks[i_row]
+            vertical_mask = vertical_line_masks[i_col]
+            np.bitwise_and(horizontal_mask, vertical_mask, out=intersection)
             intersection_points = np.argwhere(intersection == 255)
 
-            # There should not be more than several intersection points:
-            # one is the default, 2 might be due to the overlapping of steps in lines.
-            assert 1 <= intersection_points.shape[0] <= 2
+            # No real intersection pixels - this may happen due to the staircase form of lines.
+            if intersection_points.shape[0] == 0:
+                horizontal_mask = np.roll(horizontal_mask, 1, axis=0)
+                np.bitwise_and(horizontal_mask, vertical_mask, out=intersection)
+                intersection_points = np.argwhere(intersection == 255)
+
+            assert intersection_points.shape[0] >= 1
             grid_points[i_row, i_col] = np.flip(intersection_points[0])  # put x before y
 
             # if _VIZUALIZE:
@@ -136,13 +152,25 @@ def _find_vertical_lines(field_gray: Field,
                        borderType=cv2.BORDER_DEFAULT)
     np.clip(grad_x, a_min=0, a_max=grad_x.max(), out=grad_x)
     grad_x = cv2.normalize(grad_x, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
+    _, grad_x_clean = cv2.threshold(grad_x, _GRAD_THRESHOLD, 255, cv2.THRESH_BINARY)
+
+    contours, _ = cv2.findContours(grad_x_clean, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        # Too short.
+        if h < field_gray.ideal_cell_side():
+            cv2.drawContours(grad_x_clean, [contour], 0, color=0, thickness=-1)
+        # Too wide and short to be a part of a line.
+        elif w > field_gray.ideal_cell_side() * 0.3 and h < field_gray.ideal_cell_side() * 4:
+            cv2.drawContours(grad_x_clean, [contour], 0, color=0, thickness=-1)
 
     if _VIZUALIZE:
         show_image("grad_x", grad_x)
+        show_image("grad_x_clean", grad_x_clean)
 
-    grad_x_rot = cv2.rotate(grad_x, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    grad_x_clean_rot = cv2.rotate(grad_x_clean, cv2.ROTATE_90_COUNTERCLOCKWISE)
     work_field = Field(
-        grad_x_rot,
+        grad_x_clean_rot,
         field_gray.side,
         field_gray.margin
     )
@@ -167,12 +195,23 @@ def _find_horizontal_lines(field_gray: Field,
                        borderType=cv2.BORDER_DEFAULT)
     np.clip(grad_y, a_min=0, a_max=grad_y.max(), out=grad_y)
     grad_y = cv2.normalize(grad_y, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
+    _, grad_y_clean = cv2.threshold(grad_y, _GRAD_THRESHOLD, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(grad_y_clean, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        # Too short.
+        if w < field_gray.ideal_cell_side() * 0.9:
+            cv2.drawContours(grad_y_clean, [contour], 0, color=0, thickness=-1)
+        # Too high and short to be a part of a line.
+        elif h > field_gray.ideal_cell_side() * 0.5 and w < field_gray.ideal_cell_side() * 4:
+            cv2.drawContours(grad_y_clean, [contour], 0, color=0, thickness=-1)
 
     if _VIZUALIZE:
         show_image("grad_y", grad_y)
+        show_image("grad_y_clean", grad_y_clean)
 
     work_field = Field(
-        grad_y,
+        grad_y_clean,
         field_gray.side,
         field_gray.margin
     )
@@ -200,56 +239,44 @@ def _rotate_border(field: Field, border: np.ndarray, change_order: bool) -> np.n
 def _find_lines(work_field: Field,
                 top_border: np.ndarray, bottom_border: np.ndarray, left_border: np.ndarray)\
         -> List[List[Tuple[int, int]]]:
-    cell_side = work_field.ideal_cell_side()
-    points_to_fit_on_extrapolation = 5
-
-    _, work_image_thresh = cv2.threshold(work_field.image, 5, 255, cv2.THRESH_BINARY)
-    work_field_thresh = Field(
-        work_image_thresh,
-        work_field.side,
-        work_field.margin
-    )
-
     lines = [[] for _ in range(10)]
 
     # Refine borders.
     for x, y in top_border:
-        y = _refine_point(work_field.image, x, y, 2)
-        if y is not None:
-            lines[0].append((x, y))
+        y1 = refine_point(work_field.image, x, y, 3, 3)
+        if y1 is not None:
+            y = y1
+        lines[0].append((x, y))
     for x, y in bottom_border:
-        y = _refine_point(work_field.image, x, y, 3)
-        assert y is not None
-        if y is not None:
-            lines[9].append((x, y))
+        y1 = refine_point(work_field.image, x, y, 3, 3)
+        if y1 is not None:
+            y = y1
+        lines[9].append((x, y))
 
-    horizonal_look_ahead = cell_side * 2
+    current_line = top_border
 
-    first_point_behind = np.argmax(top_border[:, 0] >= top_border[0, 0] + horizonal_look_ahead) + 1
-    current_line = top_border[:first_point_behind + 1]
-
-    left_border_mapper = BorderMapper(left_border)
+    left_border_mapper = LineMapper(left_border)
 
     for i in range(1, 9):
-        current_line = _find_next_line(work_field_thresh, current_line, left_border_mapper, horizonal_look_ahead)
+        x_off, y_off, coeffs = _find_next_line(work_field, current_line, left_border_mapper)
 
-        # Due to noise and the border thickness, the first point is likely to be an outlier,
-        # replacing it with an exptrapolation.
-        x = 0
-        y = _extrapolate_y(current_line[1:points_to_fit_on_extrapolation + 2], x)
-        current_line[0] = (x, y)
-
-        full_line = _continue_line(work_field_thresh, current_line)
-
-        # Due to noise and the border thickness, the last point is likely to be an outlier,
-        # replacing it with an exptrapolation.
-        x = work_field.image.shape[1]
-        y = _extrapolate_y(full_line[-points_to_fit_on_extrapolation - 1:-1], x)
-        full_line[-1] = (x, y)
-
-        lines[i] = full_line
+        border_starts_x = left_border_mapper.map_x(y_off)
+        current_line = []
+        lines[i] = []
+        for x in range(-x_off, work_field.image.shape[1], 5):
+            # todo optimize
+            y = 0
+            for p, k in enumerate(reversed(coeffs)):
+                y += k * x ** p
+            y = int(round(y))
+            p = (x + x_off, y + y_off)
+            lines[i].append(p)
+            if x >= border_starts_x:
+                current_line.append(p)
+        current_line = np.array(current_line)
 
     # Extrapolate borders.
+    points_to_fit_on_extrapolation = 7
     for line_i in [0, -1]:
         line = lines[line_i]
 
@@ -257,63 +284,58 @@ def _find_lines(work_field: Field,
         y = _extrapolate_y(line[:points_to_fit_on_extrapolation + 1], x)
         line.insert(0, (x, y))
 
-        x = work_field.image.shape[1]
+        x = work_field.image.shape[1] - 1
         y = _extrapolate_y(line[-points_to_fit_on_extrapolation:], x)
         line.append((x, y))
 
     return lines
 
 
-def _find_next_line(work_field_thresh: Field,
-                    current_line: np.ndarray, left_border_mapper: BorderMapper, horizonal_look_ahead: int)\
-        -> List[Tuple[int, int]]:
-    cell_side = work_field_thresh.ideal_cell_side()
+def _find_next_line(work_field: Field,
+                    current_line: np.ndarray, left_border_mapper: LineMapper) -> Tuple[int, int, Tuple[float, float, float, float]]:
+    x1, y1 = current_line[0]
 
-    x1 = current_line[0][0]
-    x2 = x1 + horizonal_look_ahead
-    xs = [i[0] for i in current_line]
-    ys = [i[1] for i in current_line]
-    a, b = np.polyfit(xs, ys, 1)
-    y1 = int(round(a * x1 + b))
-    y2 = int(round(a * x2 + b))
+    x_min = np.min(current_line[:, 0])
+    x_max = np.max(current_line[:, 0])
+    y_min = np.min(current_line[:, 1])
+    y_max = np.max(current_line[:, 1])
 
-    def _relative_coords(x1: int, y1: int, x2: int, y2: int) -> Tuple[int, int, int, int]:
-        assert x1 < x2
-        x2 -= x1
-        x1 = 0
-        y_min = min(y1, y2)
-        y1 -= y_min
-        y2 -= y_min
-        return x1, y1, x2, y2
+    current_line_rel = np.copy(current_line)
+    current_line_rel[:, 0] = current_line_rel[:, 0] - x_min
+    current_line_rel[:, 1] = current_line_rel[:, 1] - y_min
 
-    x1_rel, y1_rel, x2_rel, y2_rel = _relative_coords(x1, y1, x2, y2)
+    poly = [np.array(current_line_rel, np.int32)]
+    mask = np.zeros((y_max - y_min + 1, x_max - x_min + 1), dtype=np.uint8)
+    cv2.polylines(mask, poly, isClosed=False, color=255, thickness=1)
 
-    def create_mask(x1_rel: int, y1_rel: int, x2_rel: int, y2_rel: int) -> np.ndarray:
-        assert x1_rel < x2_rel
-        mask = np.zeros((abs(y1_rel - y2_rel) + 1, x2_rel - x1_rel + 1), dtype=np.uint8)
-        cv2.line(mask, (x1_rel, y1_rel), (x2_rel, y2_rel), 255, 1)
-        return mask
-
-
-    mask = create_mask(x1_rel, y1_rel, x2_rel, y2_rel)
     max_intersect = np.count_nonzero(mask)
-    intersect_threshold = max_intersect * 0.7
+    intersect_threshold = max_intersect * 0.4
+    # print("Max intersect:", max_intersect)
+    # print("Intersect threshold:", intersect_threshold)
+
+    focus_window_additional_height_half = 7
+
+    if _VIZUALIZE:
+        viz = cv2.cvtColor(work_field.image, cv2.COLOR_GRAY2BGR)
 
     seen_max = None
     seen_max_y_off = None
     seen_max_x_off = None
-    for y_off in range(y1 + cell_side // 3, y1 + cell_side * 2):
+    for y_off in range(y1 + work_field.ideal_cell_side() // 3, y1 + work_field.ideal_cell_side() * 2):
         x_off = left_border_mapper.map_x(y_off)
 
-        sub_img = work_field_thresh.image[y_off:mask.shape[0] + y_off, x_off:mask.shape[1] + x_off]
-        assert sub_img.shape == mask.shape
+        sub_img = work_field.image[y_off:mask.shape[0] + y_off, x_off:mask.shape[1] + x_off]
+        cropped_mask = mask[:, 0:sub_img.shape[1]]
+        assert sub_img.shape == cropped_mask.shape
 
-        intersect = np.bitwise_and(sub_img, mask)
+        intersect = np.bitwise_and(sub_img, cropped_mask)
         s = np.sum(intersect) // 255
 
-        # if debug:
-        #     cv2.line(viz, (x1_rel + x_off, y1_rel + y_off), (x2_rel + x_off, y2_rel + y_off), (0, 255, 0), 1)
-        #     print(s, intersect_threshold)
+        if _VIZUALIZE:
+            x1_rel = x1 - x_min
+            y1_rel = y1 - y_min
+            cv2.circle(viz, (x1_rel + x_off, y1_rel + y_off), 1, (0, 255, 0))
+            print(s, intersect_threshold)
 
         if s >= intersect_threshold:
             if seen_max is None or s > seen_max:
@@ -321,97 +343,35 @@ def _find_next_line(work_field_thresh: Field,
                 seen_max_y_off = y_off
                 seen_max_x_off = x_off
 
-            # print(y_off, s)
-            # cv2.line(viz, (x1_rel + x_off, y1_rel + y_off), (x2_rel + x_off, y2_rel + y_off), (0, 255, 0), 1)
         else:
             if seen_max is not None:
-                # print("Stopping at", y_off)
                 break
     else:
-        assert False
+        if _VIZUALIZE:
+            show_image("mask", mask, 100)
+            show_image("viz", viz, 700)
+            wait_windows()
+        raise GridDetectionException
 
-    # todo optimization: don't refine if more than another threshold
+    focus_window = work_field.image[
+                   seen_max_y_off - focus_window_additional_height_half:mask.shape[0] + seen_max_y_off + focus_window_additional_height_half,
+                   seen_max_x_off:mask.shape[1] + seen_max_x_off
+                   ]
+    mask2 = np.zeros(focus_window.shape, dtype=np.uint8)
+    mask_line = np.copy(current_line)
+    mask_line[:, 0] = mask_line[:, 0] - x_min
+    mask_line[:, 1] = mask_line[:, 1] - y_min + focus_window_additional_height_half
+    poly = [np.array(mask_line, np.int32)]
+    cv2.polylines(mask2, poly, isClosed=False, color=255, thickness=focus_window_additional_height_half)
+    focus_window = np.bitwise_and(focus_window, mask2)
 
-    x = x1_rel + seen_max_x_off
-    y = y1_rel + seen_max_y_off
-
-    dx = 5
-    dy = a * dx
-    points_to_collect = horizonal_look_ahead // dx
-    line = []
-    for i in range(points_to_collect):
-        x_int = int(round(x))
-        y_int = int(round(y))
-
-        y_int = _refine_point(work_field_thresh.image, x_int, y_int, 2)
-        if y_int is not None:
-           line.append((x_int, y_int))
-
-        x += dx
-        y += dy
-    return line
-
-
-def _continue_line(work_field_thresh: Field, line: List[Tuple[int, int]])\
-        -> List[Tuple[int, int]]:
-    line = list(line)
-    for run in range(1000):  # effectively infinite
-        tail = np.array(line[-10:])
-        a, b = np.polyfit(tail[:, 0], tail[:, 1], 1)
-        x, y = tail[-1]
-        dx = 5
-        dy = a * dx
-
-        if x >= work_field_thresh.margin + work_field_thresh.side:
-            break
-
-        new_points = _continue_line_run(work_field_thresh, x, y, dx, dy)
-        if len(new_points) == 0:
-            break
-        line += new_points
-    return line
-
-
-def _continue_line_run(work_field_thresh: Field, x: int, y: int, dx: float, dy: float)\
-        -> List[Tuple[int, int]]:
-    new_points = []
-    skipped_steps = 0
-    for _ in range(40):
-        x += dx
-
-        if x >= work_field_thresh.margin + work_field_thresh.side:
-            break
-
-        y += dy
-        x_int = int(round(x))
-        y_int = int(round(y))
-
-        y_refined = _refine_point(work_field_thresh.image, x_int, y_int, 1)
-        if y_refined is not None:
-            new_points.append((x_int, y_refined))
-            # We started to diverge, let's reset.
-            if y_refined != y_int:
-                break
-        else:
-            skipped_steps += 1
-            if skipped_steps >= 2:
-                break
-            else:
-                continue
-    return new_points
-
-
-def _refine_point(work_image: np.ndarray, x: int, y: int, win_h_half: int) -> Optional[int]:
-    ys_centered = np.arange(win_h_half * 2 + 1) - win_h_half
-    ys_centered = ys_centered[:, np.newaxis]
-    window = work_image[y - win_h_half:y + win_h_half + 1, x:x + 1]
-    s = np.sum(window)
-    if s > 0:
-        avg = np.sum(ys_centered * window) / s
-        avg = int(round(avg))
-        return y + avg
-    else:
-        return None
+    x_off = seen_max_x_off
+    y_off = seen_max_y_off - focus_window_additional_height_half
+    white_points = np.argwhere(focus_window > 0)
+    xs = white_points[:, 1]
+    ys = white_points[:, 0]
+    coeffs = np.polyfit(xs, ys, 3)
+    return x_off, y_off, tuple(coeffs)
 
 
 def _extrapolate_y(points: List[Tuple[int, int]], x: int) -> int:
@@ -614,7 +574,7 @@ def _recognize_field(unwrapped_field_img: np.ndarray, cell_side: int) -> np.ndar
         elif labels_2[i] == labels_3[i]:
             labels[i] = labels_2[i]
         else:
-            assert False, "Can't recognize"
+            assert False, "Can't recognize field"
 
     recognized_field = np.zeros(shape=(9, 9), dtype=np.uint8)
     for i, (i_row, i_col) in enumerate(digits_to_recognize_coords):
@@ -632,7 +592,7 @@ def _recognize_field(unwrapped_field_img: np.ndarray, cell_side: int) -> np.ndar
 
 if __name__ == "__main__":
     from sudoku.solver import load_image
-    from utils import scale_image
+    from utils import scale_image_target_height
     image_files = [
         "../images/big-numbers.jpg",
         "../images/slightly_blurry.jpg",
@@ -647,7 +607,7 @@ if __name__ == "__main__":
 
     for f in image_files:
         image = load_image(f)
-        image = scale_image(image, 640)
+        image = scale_image_target_height(image, 640)
         recognized_field = recognize_field(image)
         print(recognized_field)
     if _VIZUALIZE:

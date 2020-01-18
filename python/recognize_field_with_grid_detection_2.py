@@ -7,12 +7,12 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from border_mapper import BorderMapper
+from line_mapper import LineMapper
 # from digit_recognizer_2 import create_recognizer
 from solver import solve
 from sudoku.solver import load_image, cut_out_field, find_corners, perspective_transform_contour, \
     extract_subcontour
-from utils import show_image, wait_windows, scale_image, segment_length, get_line_coeffs
+from utils import show_image, wait_windows, scale_image_target_height, segment_length, get_line_coeffs
 
 _GRID_LINES = 10
 
@@ -36,7 +36,7 @@ image = load_image("../images/warped.jpg")
 # if _VIZUALIZE:
 #     show_image("orig", image)
 
-image = scale_image(image, 640)
+image = scale_image_target_height(image, 640)
 
 
 t = time.time()
@@ -109,7 +109,7 @@ left_border = extract_subcontour(transformed_field_contour, top_left_idx, bottom
 cell_side = field.side // 9
 
 
-def find_lines_1(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, border_mapper: BorderMapper):
+def find_lines_1(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, border_mapper: LineMapper):
     gap = 5
     max_x_dist_between_points = gap * 3
     # y_center = 0
@@ -171,7 +171,7 @@ def find_lines_1(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, bo
             y_center += 1
 
 
-def find_lines_2(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, border_mapper: BorderMapper):
+def find_lines_2(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, border_mapper: LineMapper):
     border_start_x, border_start_y = border[0]
     border_end_x, border_end_y = border[-1]
 
@@ -252,11 +252,11 @@ def find_lines_2(work_image: np.ndarray, viz: np.ndarray, border: np.ndarray, bo
     pass
 
 _, grad_y_thresh = cv2.threshold(grad_y, 5, 255, cv2.THRESH_BINARY)
-top_border_mapper = BorderMapper(top_border)
+top_border_mapper = LineMapper(top_border)
 
 _, grad_x_thresh = cv2.threshold(grad_x, 5, 255, cv2.THRESH_BINARY)
 grad_x_thresh = cv2.rotate(grad_x_thresh, cv2.ROTATE_90_COUNTERCLOCKWISE)
-left_border_mapper = BorderMapper(left_border)
+left_border_mapper = LineMapper(left_border)
 
 work_image_orig = grad_y
 work_image = grad_y_thresh

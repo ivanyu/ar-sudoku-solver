@@ -6,8 +6,13 @@ import cv2
 import numpy as np
 
 
-def scale_image(img, target_height):
+def scale_image_target_height(img, target_height):
     resize_coeff = target_height / img.shape[0]
+    return cv2.resize(img, (int(img.shape[1] * resize_coeff), int(img.shape[0] * resize_coeff)), interpolation=cv2.INTER_CUBIC)
+
+
+def scale_image_target_width(img, target_width):
+    resize_coeff = target_width / img.shape[1]
     return cv2.resize(img, (int(img.shape[1] * resize_coeff), int(img.shape[0] * resize_coeff)), interpolation=cv2.INTER_CUBIC)
 
 
@@ -15,7 +20,7 @@ def show_image(window_name: str, image: np.ndarray, target_height: Optional[int]
     if target_height is None:
         cv2.imshow(window_name, image)
     else:
-        cv2.imshow(window_name, scale_image(image, target_height))
+        cv2.imshow(window_name, scale_image_target_height(image, target_height))
 
 
 def wait_windows():
