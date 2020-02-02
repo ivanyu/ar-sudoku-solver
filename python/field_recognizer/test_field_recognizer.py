@@ -106,10 +106,10 @@ class TestFieldRecognizer(unittest.TestCase):
                 frame_i += 1
                 continue
 
-            if frame_i != 191:
-                frame_i += 1
-                continue
-
+            # if frame_i != 52:
+            #     frame_i += 1
+            #     continue
+            #
             with self.subTest(frame_i=frame_i):
                 frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 image = scale_image_target_height(frame, 640)

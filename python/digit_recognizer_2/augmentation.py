@@ -133,3 +133,25 @@ def scratches():
             draw.line((x1, y1, x2, y2), fill=fill)
         return img
     return inner
+
+
+def cross_through():
+    def inner(img: Image):
+        count = random.randint(1, 3)
+        draw = ImageDraw.Draw(img)
+        for _ in range(count):
+            is_horizontal = random.randint(0, 1)
+            if is_horizontal:
+                x1 = 0
+                y1 = random.randint(0, img.height)
+                x2 = img.width
+                y2 = random.randint(0, img.height)
+            else:
+                x1 = random.randint(0, img.width)
+                y1 = 0
+                x2 = random.randint(0, img.width)
+                y2 = img.height
+            draw.line((x1, y1, x2, y2), fill=0, width=2)
+
+        return img
+    return inner

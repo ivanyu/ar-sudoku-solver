@@ -7,21 +7,21 @@ class DigitRecognizer2(nn.Module):
     def __init__(self):
         super(DigitRecognizer2, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=6, kernel_size=5, padding=1)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=12, kernel_size=5, padding=1)
         # self.dropout_conv1 = nn.Dropout2d(0.1)
         self.bn1 = nn.BatchNorm2d(self.conv1.out_channels)
         self.maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv2 = nn.Conv2d(in_channels=self.conv1.out_channels, out_channels=16, kernel_size=5)
+        self.conv2 = nn.Conv2d(in_channels=self.conv1.out_channels, out_channels=36, kernel_size=5)
         # self.dropout_conv2= nn.Dropout2d(0.1)
         self.bn2 = nn.BatchNorm2d(self.conv2.out_channels)
         self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         img_size_after_conv = 4
         self.fc1 = nn.Linear(in_features=self.conv2.out_channels * img_size_after_conv * img_size_after_conv,
-                             out_features=120)
+                             out_features=180)
         # self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(in_features=self.fc1.out_features, out_features=84)
+        self.fc2 = nn.Linear(in_features=self.fc1.out_features, out_features=100)
         # self.dropout2 = nn.Dropout(0.5)
         self.fc3 = nn.Linear(in_features=self.fc2.out_features, out_features=9)
 

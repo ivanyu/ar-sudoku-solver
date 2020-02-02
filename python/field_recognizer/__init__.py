@@ -18,7 +18,7 @@ _GRAD_THRESHOLD = 5
 _GRID_LINES = 10
 
 _VIZUALIZE = False
-_SAVE_DIGIT_IMAGES = True
+_SAVE_DIGIT_IMAGES = False
 
 if _VIZUALIZE:
     from utils import show_image, wait_windows
@@ -491,34 +491,13 @@ def _recognize_field(unwrapped_field_img: np.ndarray, cell_side: int) -> np.ndar
                 from PIL import Image, ImageFilter, ImageDraw
                 import torchvision as tv
                 img = Image.fromarray(digit_img)
-                img = tv.transforms.functional.affine(img, angle=0, translate=(0, 0), scale=0.9,
-                                                      shear=0, resample=Image.BICUBIC)
-                # draw = ImageDraw.Draw(img)
-                # print(draw)
-                # r = img.filter(ImageFilter.GaussianBlur(radius=1))
-                digit_img_2 = np.array(img)
+                img_2 = tv.transforms.functional.affine(img, angle=0, translate=(0, 0), scale=0.9,
+                                                        shear=0, resample=Image.BICUBIC)
+                digit_img_2 = np.array(img_2)
 
-                # rows, cols = digit_img.shape
-                # gauss = np.random.normal(0, 3, (rows, cols))
-                # gauss = gauss.reshape(rows, cols)
-                # digit_img_3 = digit_img.astype(np.float) + gauss
-                # digit_img_3 = cv2.normalize(digit_img_3, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-                # digit_img_3 = cv2.threshold(digit_img, 150, 255, cv2.THRESH_BINARY)[1]
-
-                img = tv.transforms.functional.affine(img, angle=0, translate=(0, 0), scale=0.8,
-                                                      shear=0, resample=Image.BICUBIC)
-                # draw = ImageDraw.Draw(img)
-                # print(draw)
-                # r = img.filter(ImageFilter.GaussianBlur(radius=1))
-                digit_img_3 = np.array(img)
-
-                # digit_img_2 = cv2.copyMakeBorder(cv2.resize(digit_img, (24, 24)), 2, 2, 2, 2, cv2.BORDER_CONSTANT)
-                # digit_img_2 = cv2.morphologyEx(digit_img_2, cv2.MORPH_CLOSE,
-                #                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1)))
-                #
-                # digit_img_3 = cv2.resize(digit_img, (32, 32))[2:30, 2:30]
-                # digit_img_3 = cv2.morphologyEx(digit_img_3, cv2.MORPH_OPEN,
-                #                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1)))
+                img_3 = tv.transforms.functional.affine(img, angle=0, translate=(0, 0), scale=0.8,
+                                                        shear=0, resample=Image.BICUBIC)
+                digit_img_3 = np.array(img_3)
 
                 if _SAVE_DIGIT_IMAGES:
                     import os
@@ -532,35 +511,14 @@ def _recognize_field(unwrapped_field_img: np.ndarray, cell_side: int) -> np.ndar
                     cv2.imwrite(os.path.join(dir, f"{name}.jpg"), digit_img)
                     cv2.imwrite(os.path.join(dir, f"{name}.png"), digit_img)
                     cv2.imwrite(os.path.join(dir, f"{name}-2.jpg"), digit_img_2)
+                    cv2.imwrite(os.path.join(dir, f"{name}-2.png"), digit_img_2)
                     cv2.imwrite(os.path.join(dir, f"{name}-3.jpg"), digit_img_3)
+                    cv2.imwrite(os.path.join(dir, f"{name}-3.png"), digit_img_3)
 
                 # digits_to_recognize_2.append(digit_img_2[np.newaxis, :, :])
                 digits_to_recognize_2.append(digit_img_2)
                 # digits_to_recognize_3.append(digit_img_3[np.newaxis, :, :])
                 digits_to_recognize_3.append(digit_img_3)
-
-    # digits_to_recognize = np.vstack(digits_to_recognize)
-    # digits_to_recognize_2 = np.vstack(digits_to_recognize_2)
-    # digits_to_recognize_3 = np.vstack(digits_to_recognize_3)
-
-    # special1 = recognizer(digits_to_recognize[22][np.newaxis, :, :])
-    # import os
-    # cv2.imwrite("tmp.jpg", digits_to_recognize[22])
-    #
-    # from PIL import Image
-    # img = Image.open("tmp.jpg")
-    # import torchvision as tv
-    # tensor = tv.transforms.ToTensor()(img).unsqueeze(1).float()
-    # from digit_recognizer_2 import DigitRecognizer2
-    # _digit_recognizer: DigitRecognizer2 = DigitRecognizer2()
-    # _path = os.path.join(
-    #     os.path.dirname(os.path.dirname(__file__)),
-    #     "model-ft.pth"
-    # )
-    # import torch
-    # _digit_recognizer.load_state_dict(torch.load(_path))
-    # _digit_recognizer.eval()
-    # special2 = torch.max(_digit_recognizer(tensor).data, dim=1)[1] + 1
 
     labels, outputs = recognizer(digits_to_recognize)
     labels_2, outputs_2 = recognizer(digits_to_recognize_2)
